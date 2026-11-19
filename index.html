@@ -227,7 +227,7 @@ td.res-void { color: var(--muted); }
     </div>
 
     <div class="panel">
-      <h3>NFC 感應</h3>
+      <h3>IC 卡感應</h3>
       <div class="row" style="margin:0 0 10px"><button class="small" id="btnWebNfc" type="button">用這台 Android 手機感應</button></div>
       <p class="note" id="webNfcStatus" style="margin:0 0 10px">手機感應尚未開啟。</p>
       <p class="empty-note" id="enrollStatus">尚未登錄牌組。</p>
@@ -386,7 +386,7 @@ td.res-void { color: var(--muted); }
     else render();
   }
 
-  /* ---------- NFC reader in keyboard mode: a fast burst of characters ending in Enter ---------- */
+  /* ---------- IC card reader in keyboard mode: a fast burst of characters ending in Enter ---------- */
   var burst = '', lastKeyAt = 0;
   document.addEventListener('keydown', function (event) {
     if (event.target && event.target.matches && event.target.matches('input, textarea, select')) return;
@@ -411,10 +411,10 @@ td.res-void { color: var(--muted); }
         var now = Date.now();
         if (event.serialNumber === lastTag && now - lastTagAt < 1500) return;
         lastTag = event.serialNumber; lastTagAt = now;
-        if (!event.serialNumber) { say('讀到貼紙但拿不到卡號，請再感應一次。'); return; }
+        if (!event.serialNumber) { say('讀到 IC 貼紙但拿不到卡號，請再感應一次。'); return; }
         onTag(event.serialNumber);
       };
-      reader.onreadingerror = function () { say('讀不到這張貼紙，請拿開再感應一次。'); };
+      reader.onreadingerror = function () { say('讀不到這張 IC 貼紙。請拿開再感應一次；每一張都讀不到的話，這支手機不支援這種貼紙，請改用讀卡機。'); };
     }).catch(function (error) {
       status.textContent = '瀏覽器拒絕了感應（' + error.name + '）。這一頁嵌在框架裡或不是 HTTPS 時會這樣，要放到自己的網址才能用。';
     });
@@ -423,12 +423,12 @@ td.res-void { color: var(--muted); }
   function onTag(tagId) {
     if (state.enroll) { enrollTag(tagId); return; }
     var card = state.tagMap[tagId];
-    if (!card) { say('這張貼紙沒有登錄過（' + tagId + '）。請先登錄牌組，或改用手點。'); return; }
+    if (!card) { say('這張 IC 貼紙沒有登錄過（' + tagId + '）。請先登錄牌組，或改用手點。'); return; }
     inputCard(card);
   }
   function enrollTag(tagId) {
     var deck = allCards();
-    if (state.enroll.map[tagId]) { say('這張貼紙剛才已登錄為 ' + cardLabel(state.enroll.map[tagId]) + '，請換下一張牌。'); return; }
+    if (state.enroll.map[tagId]) { say('這張 IC 貼紙剛才已登錄為 ' + cardLabel(state.enroll.map[tagId]) + '，請換下一張牌。'); return; }
     state.enroll.map[tagId] = deck[state.enroll.index];
     state.enroll.index += 1;
     if (state.enroll.index >= deck.length) {
