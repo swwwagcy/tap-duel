@@ -238,14 +238,15 @@ summary { cursor: pointer; padding: 8px 0; font-weight: 500; }
       <h3>IC 卡感應</h3>
       <div class="row" style="margin:0 0 10px"><button class="small" id="btnWebNfc" type="button">用這台 Android 手機感應</button></div>
       <p class="note" id="webNfcStatus" style="margin:0 0 10px">手機感應尚未開啟。</p>
-      <p class="empty-note" id="enrollStatus">尚未登錄牌組。</p>
+      <p class="empty-note" id="enrollStatus">尚未登記牌組。</p>
       <p id="enrollPrompt" hidden></p>
+      <p class="note" id="enrollLast" hidden></p>
       <div class="row">
-        <button class="small" id="btnEnroll" type="button">開始登錄牌組</button>
-        <button class="small" id="btnEnrollClear" type="button">清除登錄</button>
+        <button class="small" id="btnEnroll" type="button">開始登記牌組</button>
+        <button class="small" id="btnEnrollClear" type="button">清除登記</button>
       </div>
-      <details id="deckDetails"><summary>已登錄的牌與 IC 卡號</summary><div class="deck" id="deckList"></div></details>
-      <p class="note">開啟手機感應，或接上鍵盤模式的讀卡機後，照畫面指示把 52 張牌各感應一次。登錄完成後，出牌時感應就等於點牌。登錄資料只存在這台裝置。</p>
+      <details id="deckDetails"><summary>已登記的牌與 IC 卡號</summary><div class="deck" id="deckList"></div></details>
+      <p class="note">每感應一張就立即保存、馬上能用，不必一次登記完 52 張。出牌時感應到還沒登記的 IC，點它是哪張牌就會登記並直接使用。登記資料只存在這台裝置。</p>
     </div>
   </section>
   </div>
@@ -290,7 +291,8 @@ summary { cursor: pointer; padding: 8px 0; font-weight: 500; }
     log: load('tapduel-log', []),
     settings: load('tapduel-settings', { count: 20, buffer: 5, auto: true }),
     tagMap: load('tapduel-tagmap', {}),
-    enroll: null             // { index, map } while enrolling
+    pendingTag: null,        // an unknown IC tapped while dealing, waiting for the host to say which card it is
+    enroll: null             // { index, fill, last } while enrolling one card at a time
   };
 
   function start() {
@@ -316,6 +318,7 @@ summary { cursor: pointer; padding: 8px 0; font-weight: 500; }
     state.roundNo = 'R' + dayKey() + '-' + String(state.sequence).padStart(3, '0');
     state.cards = [null, null];
     state.tags = [null, null];
+    state.pendingTag = null;
     state.pickSuit = state.pickRank = null;
     state.result = null;
     state.phase = 'counting';
@@ -355,11 +358,13 @@ summary { cursor: pointer; padding: 8px 0; font-weight: 500; }
 
   function redo() {
     if (state.phase !== 'dealing' && state.phase !== 'confirm') return;
+    var hadPending = !!state.pendingTag && !state.cards[0];
     state.cards = [null, null];
     state.tags = [null, null];
+    state.pendingTag = null;
     state.pickSuit = state.pickRank = null;
     state.phase = 'dealing';
-    say('已清掉兩張牌，請從紅方重新輸入。');
+    say(hadPending ? '已取消這張新的 IC，沒有登記。' : '已清掉兩張牌，請從紅方重新輸入。');
     render();
   }
 
@@ -382,6 +387,7 @@ summary { cursor: pointer; padding: 8px 0; font-weight: 500; }
 
   function voidRound() {
     record('void');
+    state.pendingTag = null;
     state.result = 'void';
     state.phase = 'void';
     state.deadline = seconds(VOID_HOLD_SECONDS);
@@ -408,8 +414,14 @@ summary { cursor: pointer; padding: 8px 0; font-weight: 500; }
   function pick(field, value) {
     if (state.phase !== 'dealing') { inputCard('SA'); return; } // reuse the refusal message; nothing is recorded outside dealing
     state[field] = state[field] === value ? null : value;
-    if (state.pickSuit && state.pickRank) inputCard(state.pickSuit + state.pickRank);
-    else render();
+    if (!(state.pickSuit && state.pickRank)) { render(); return; }
+    var card = state.pickSuit + state.pickRank;
+    if (!state.pendingTag) { inputCard(card); return; }
+    if (state.cards[0] === card) { say(cardLabel(card) + ' 這一回合已經出現在紅方，這張 IC 沒有登記。請重新點它是哪張牌。'); state.pickSuit = state.pickRank = null; render(); return; }
+    var tagId = state.pendingTag;
+    state.pendingTag = null;
+    assignTag(tagId, card);
+    inputCard(card, tagId);
   }
 
   /* ---------- IC card reader in keyboard mode: a fast burst of characters ending in Enter ---------- */
@@ -446,21 +458,36 @@ summary { cursor: pointer; padding: 8px 0; font-weight: 500; }
     });
   }
 
+  // One card, one IC: saving a pair drops whatever the card pointed at before, and is stored straight away.
+  function assignTag(tagId, card) {
+    Object.keys(state.tagMap).forEach(function (other) { if (state.tagMap[other] === card) delete state.tagMap[other]; });
+    state.tagMap[tagId] = card;
+    save('tapduel-tagmap', state.tagMap);
+  }
+  function nextUnregistered(from) {
+    var deck = allCards(), taken = {};
+    Object.keys(state.tagMap).forEach(function (tagId) { taken[state.tagMap[tagId]] = true; });
+    for (var index = from; index < deck.length; index++) if (!taken[deck[index]]) return index;
+    return -1;
+  }
+
   function onTag(tagId) {
     if (state.enroll) { enrollTag(tagId); return; }
     var card = state.tagMap[tagId];
-    if (!card) { say('這張 IC 貼紙沒有登錄過（' + tagId + '）。請先登錄牌組，或改用手點。'); return; }
-    inputCard(card, tagId);
+    if (card) { state.pendingTag = null; inputCard(card, tagId); return; }
+    if (state.phase !== 'dealing') { say('這張 IC 還沒登記（' + tagId + '）。可以出牌時再感應一次，點它是哪張牌就會登記；也可以到設定裡逐張登記。'); return; }
+    state.pendingTag = tagId;
+    state.pickSuit = state.pickRank = null;
+    say('新的 IC（' + tagId + '）。請點這張牌的花色與點數，會登記並直接使用。');
+    render();
   }
   function enrollTag(tagId) {
-    var deck = allCards();
-    if (state.enroll.map[tagId]) { say('這張 IC 貼紙剛才已登錄為 ' + cardLabel(state.enroll.map[tagId]) + '，請換下一張牌。'); return; }
-    state.enroll.map[tagId] = deck[state.enroll.index];
-    state.enroll.index += 1;
-    if (state.enroll.index >= deck.length) {
-      state.tagMap = state.enroll.map; save('tapduel-tagmap', state.tagMap); state.enroll = null;
-      say('52 張牌登錄完成。');
-    }
+    var deck = allCards(), card = deck[state.enroll.index], existing = state.tagMap[tagId];
+    if (existing && state.enroll.fill) { state.enroll.last = '這張 IC 已登記為 ' + cardLabel(existing) + '，請換下一張牌。'; render(); return; }
+    assignTag(tagId, card);
+    var next = state.enroll.fill ? nextUnregistered(state.enroll.index + 1) : (state.enroll.index + 1 < deck.length ? state.enroll.index + 1 : -1);
+    if (next < 0) { state.enroll = null; say('整副牌都登記好了。'); }
+    else { state.enroll.index = next; state.enroll.last = '已保存：' + cardLabel(card) + ' ← IC ' + tagId; }
     render();
   }
 
@@ -509,7 +536,7 @@ summary { cursor: pointer; padding: 8px 0; font-weight: 500; }
 
     var dealing = phase === 'dealing';
     $('picker').classList.toggle('off', !dealing);
-    $('pickTitle').innerHTML = dealing ? '正在輸入：<b>' + SIDES[state.cards[0] ? 1 : 0] + '</b>（點花色與點數，先後不拘）' : '可以出牌之後，在這裡點花色與點數';
+    $('pickTitle').innerHTML = dealing && state.pendingTag ? '新的 IC（' + escapeHtml(state.pendingTag) + '）：點這張牌的<b>花色與點數</b>，登記後直接使用' : dealing ? '正在輸入：<b>' + SIDES[state.cards[0] ? 1 : 0] + '</b>（點花色與點數，先後不拘）' : '可以出牌之後，在這裡點花色與點數';
     Array.prototype.forEach.call(document.querySelectorAll('.key'), function (button) {
       button.classList.toggle('on', dealing && (button.dataset.suit === state.pickSuit || button.dataset.rank === state.pickRank) && (button.dataset.suit ? !!state.pickSuit : !!state.pickRank));
     });
@@ -519,7 +546,7 @@ summary { cursor: pointer; padding: 8px 0; font-weight: 500; }
     else if (phase === 'confirm') { main.textContent = '確認結果'; main.disabled = false; }
     else if (phase === 'settled' || phase === 'void') { main.textContent = '下一回合'; main.disabled = false; }
     else { main.textContent = phase === 'dealing' ? '等兩張牌' : '等待中'; main.disabled = true; }
-    $('btnRedo').disabled = !((phase === 'dealing' && state.cards[0]) || phase === 'confirm');
+    $('btnRedo').disabled = !((phase === 'dealing' && (state.cards[0] || state.pendingTag)) || phase === 'confirm');
     var canVoid = phase === 'counting' || phase === 'closed' || phase === 'dealing' || phase === 'confirm';
     var armed = canVoid && Date.now() < voidArmedUntil;
     $('btnVoid').disabled = !canVoid;
@@ -547,22 +574,23 @@ summary { cursor: pointer; padding: 8px 0; font-weight: 500; }
   }
 
   function renderEnroll() {
-    var count = Object.keys(state.tagMap).length;
-    $('enrollStatus').textContent = count ? '已登錄 ' + count + ' 張牌。' : '尚未登錄牌組。';
-    var showing = state.enroll ? state.enroll.map : state.tagMap, byCard = {};
-    Object.keys(showing).forEach(function (tagId) { byCard[showing[tagId]] = tagId; });
-    $('deckList').innerHTML = Object.keys(byCard).length ? allCards().filter(function (card) { return byCard[card]; }).map(function (card) {
+    var count = Object.keys(state.tagMap).length, deck = allCards(), byCard = {};
+    $('enrollStatus').textContent = count ? '已登記 ' + count + ' / 52 張牌。' : '還沒有登記任何牌。';
+    Object.keys(state.tagMap).forEach(function (tagId) { byCard[state.tagMap[tagId]] = tagId; });
+    $('deckList').innerHTML = count ? deck.filter(function (card) { return byCard[card]; }).map(function (card) {
       return '<div><b>' + cardLabel(card) + '</b><span>' + escapeHtml(byCard[card]) + '</span></div>';
-    }).join('') : '<span>還沒有登錄任何牌。</span>';
-    var prompt = $('enrollPrompt');
+    }).join('') : '<span>還沒有登記任何牌。</span>';
+    var prompt = $('enrollPrompt'), last = $('enrollLast');
     if (state.enroll) {
-      var card = allCards()[state.enroll.index];
       prompt.hidden = false;
-      prompt.textContent = '請感應 ' + cardLabel(card) + '（第 ' + (state.enroll.index + 1) + ' / 52 張）';
-      $('btnEnroll').textContent = '取消登錄';
+      prompt.textContent = '請感應 ' + cardLabel(deck[state.enroll.index]);
+      last.hidden = !state.enroll.last;
+      last.textContent = state.enroll.last || '';
+      $('btnEnroll').textContent = '停止登記';
     } else {
-      prompt.hidden = true;
-      $('btnEnroll').textContent = count ? '重新登錄牌組' : '開始登錄牌組';
+      prompt.hidden = true; last.hidden = true;
+      var first = nextUnregistered(0);
+      $('btnEnroll').textContent = count === 0 ? '開始逐張登記' : first >= 0 ? '繼續登記（下一張 ' + cardLabel(deck[first]) + '）' : '重新登記整副牌';
     }
   }
 
@@ -580,12 +608,12 @@ summary { cursor: pointer; padding: 8px 0; font-weight: 500; }
     else { voidArmedUntil = Date.now() + 3000; render(); }
   });
   $('btnEnroll').addEventListener('click', function () {
-    if (state.enroll) { state.enroll = null; say('已取消，原本的登錄沒有變。'); }
-    else if (state.phase !== 'idle' && state.phase !== 'settled' && state.phase !== 'void') { say('回合進行中不能登錄牌組，請等這一回合結束。'); }
-    else { state.enroll = { index: 0, map: {} }; }
+    if (state.enroll) { state.enroll = null; say('已停止。登記過的牌都已保存。'); }
+    else if (state.phase !== 'idle' && state.phase !== 'settled' && state.phase !== 'void') { say('回合進行中不能登記牌組，請等這一回合結束。'); }
+    else { var first = nextUnregistered(0); state.enroll = first >= 0 ? { index: first, fill: true, last: '' } : { index: 0, fill: false, last: '' }; }
     render();
   });
-  $('btnEnrollClear').addEventListener('click', function () { state.tagMap = {}; state.enroll = null; save('tapduel-tagmap', {}); say('已清除登錄。'); render(); });
+  $('btnEnrollClear').addEventListener('click', function () { state.tagMap = {}; state.enroll = null; save('tapduel-tagmap', {}); say('已清除登記。'); render(); });
   function readSettings() {
     var count = parseInt($('setCount').value, 10), buffer = parseInt($('setBuffer').value, 10);
     state.settings = {
