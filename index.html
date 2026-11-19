@@ -1,0 +1,569 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<style>body{margin:0}[hidden]{display:none!important}</style>
+</head>
+<body>
+<title>Tap Duel</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap">
+<style>
+/* Layout: one working column for the host's hand — round and phase on top (readable on camera),
+   the two card positions, the card picker, then the three actions. Log and settings sit below. */
+:root {
+  color-scheme: dark;
+  --bg: #0f1729;
+  --surface: #19233b;
+  --surface-2: #222f4d;
+  --line: #33415f;
+  --fg: #eef2fa;
+  --muted: #98a5c2;
+  --sideA: #e9584c;
+  --sideB: #4f8ff7;
+  --tie: #a98bfa;
+  --wait: #f2b23e;
+  --go: #37c58a;
+  --card: #f7f5ef;
+  --card-ink: #161b26;
+  --card-red: #c8322b;
+  --font-body: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+  --font-num: "Space Grotesk", "Noto Sans TC", system-ui, sans-serif;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.5;
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+}
+html, body { height: 100%; }
+body { overflow: hidden; }
+.wrap {
+  height: 100%;
+  padding-block: 10px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  gap: 10px;
+}
+button { font: inherit; color: inherit; cursor: pointer; }
+button:focus-visible, summary:focus-visible, input:focus-visible { outline: 3px solid var(--fg); outline-offset: 2px; }
+
+/* Top band: what the camera needs to read */
+.top { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) auto; gap: 10px; }
+.gear { min-width: 56px; min-height: 48px; border-radius: 12px; border: 2px solid var(--line); background: var(--surface); font-weight: 500; font-size: 15px; padding: 4px 12px; }
+.round {
+  min-width: 0;
+  background: var(--surface); border-radius: 12px; padding: 6px 14px;
+  display: flex; flex-direction: column; justify-content: center;
+}
+.lbl { font-size: 13px; letter-spacing: .12em; color: var(--muted); }
+#roundNo { font-family: var(--font-num); font-weight: 700; font-size: clamp(17px, 3.2vw, 38px); line-height: 1.1; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.phase {
+  min-width: 0;
+  border-radius: 12px; padding: 6px 16px;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  background: var(--surface-2); border: 2px solid var(--line);
+}
+#phaseText { font-weight: 700; font-size: clamp(20px, 4vw, 38px); line-height: 1.2; }
+#countdown { font-family: var(--font-num); font-weight: 700; font-size: clamp(30px, 6vw, 56px); line-height: 1; font-variant-numeric: tabular-nums; }
+.phase[data-phase="counting"] { border-color: var(--fg); }
+.phase[data-phase="closed"] { background: var(--wait); border-color: var(--wait); color: #1d1503; }
+.phase[data-phase="dealing"], .phase[data-phase="confirm"] { background: var(--go); border-color: var(--go); color: #04170f; }
+.phase[data-phase="void"] { border-color: var(--muted); color: var(--muted); }
+
+.demo { margin: 0; font-size: 14px; color: var(--muted); }
+
+/* Card positions */
+.main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; min-height: 0; }
+.table { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; min-height: 0; }
+.slot {
+  background: var(--surface); border-radius: 14px; padding: 10px;
+  border: 3px solid transparent; min-height: 0; min-width: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+}
+.slot h2 { margin: 0; font-size: clamp(18px, 3vmin, 26px); line-height: 1.1; font-weight: 700; }
+.slot[data-side="sideA"] h2 { color: var(--sideA); }
+.slot[data-side="sideB"] h2 { color: var(--sideB); }
+.slot.active[data-side="sideA"] { border-color: var(--sideA); }
+.slot.active[data-side="sideB"] { border-color: var(--sideB); }
+.slot.win { background: var(--surface-2); }
+.face {
+  flex: 1 1 0; min-height: 0; max-height: 300px; max-width: 100%; aspect-ratio: 5 / 7; border-radius: 10px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  font-family: var(--font-num); font-weight: 700; line-height: 1;
+}
+.face.empty { border: 2px dashed var(--line); color: var(--muted); font-family: var(--font-body); font-weight: 400; font-size: 15px; }
+.face.filled { background: var(--card); color: var(--card-ink); }
+.face.filled.red { color: var(--card-red); }
+.face .r { font-size: clamp(28px, 9vmin, 72px); }
+.face .s { font-size: clamp(24px, 7vmin, 56px); }
+.slot .tag { height: 20px; line-height: 20px; font-size: 14px; color: var(--muted); }
+.slot.win .tag { color: var(--fg); font-weight: 700; }
+
+/* Picker */
+.picker { background: var(--surface); border-radius: 14px; padding: 10px; display: grid; grid-template-rows: auto minmax(0, 1fr) minmax(0, 2fr); gap: 8px; min-height: 0; min-width: 0; }
+.picker h3 { margin: 0; font-size: 14px; line-height: 1.3; font-weight: 500; color: var(--muted); }
+.picker h3 b { color: var(--fg); }
+.suits { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; min-height: 0; }
+.ranks { display: grid; grid-template-columns: repeat(7, 1fr); grid-auto-rows: 1fr; gap: 8px; min-height: 0; }
+.key {
+  min-height: 44px; min-width: 0; padding: 0; border-radius: 10px; border: 2px solid var(--line);
+  background: var(--surface-2); font-family: var(--font-num); font-weight: 700; font-size: clamp(20px, 4vmin, 30px);
+}
+.key.suit { background: var(--card); color: var(--card-ink); border-color: var(--card); font-size: clamp(26px, 5vmin, 38px); }
+.key.suit.red { color: var(--card-red); }
+.key.on { outline: 4px solid var(--wait); outline-offset: 1px; }
+.picker.off .key { opacity: .35; }
+
+/* Actions */
+.actions { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 10px; }
+.act { min-height: 60px; border-radius: 12px; border: 2px solid var(--line); background: var(--surface); font-weight: 700; font-size: 19px; padding: 8px 10px; }
+.act.primary { background: var(--fg); color: var(--bg); border-color: var(--fg); font-size: 22px; }
+.act.danger { border-color: var(--sideA); color: var(--sideA); }
+.act.danger.armed { background: var(--sideA); color: #fff; }
+.act:disabled { opacity: .35; cursor: default; }
+
+#toast {
+  height: 46px; overflow: hidden; display: flex; align-items: center; border-radius: 10px; padding: 4px 12px; font-weight: 500; font-size: 14px; line-height: 1.3;
+  background: transparent; border: 2px solid transparent; color: var(--muted);
+}
+#toast.show { border-color: var(--wait); color: var(--fg); background: var(--surface); }
+
+/* Lower */
+.lower { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; align-items: start; }
+.panel { background: var(--surface); border-radius: 14px; padding: 14px; min-width: 0; }
+.panel h3 { margin: 0 0 10px; font-size: 17px; }
+.tally { display: flex; gap: 14px; margin-bottom: 10px; font-family: var(--font-num); font-variant-numeric: tabular-nums; font-weight: 700; }
+.tally .d { color: var(--sideA); } .tally .t { color: var(--sideB); } .tally .e { color: var(--tie); }
+.logwrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 15px; font-variant-numeric: tabular-nums; }
+th { text-align: left; font-weight: 500; color: var(--muted); font-size: 13px; padding: 4px 8px 6px 0; }
+td { padding: 6px 8px 6px 0; border-top: 1px solid var(--line); white-space: nowrap; }
+td.res-sideA { color: var(--sideA); font-weight: 700; }
+td.res-sideB { color: var(--sideB); font-weight: 700; }
+td.res-tie { color: var(--tie); font-weight: 700; }
+td.res-void { color: var(--muted); }
+.empty-note { color: var(--muted); font-size: 15px; margin: 0; }
+.field { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; border-top: 1px solid var(--line); }
+.field:first-of-type { border-top: 0; }
+.field input[type="number"] { width: 84px; min-height: 44px; font: inherit; font-family: var(--font-num); text-align: center; background: var(--surface-2); color: var(--fg); border: 2px solid var(--line); border-radius: 8px; }
+.field input[type="checkbox"] { width: 26px; height: 26px; }
+.small { min-height: 48px; padding: 6px 14px; border-radius: 10px; border: 2px solid var(--line); background: var(--surface-2); font-weight: 500; }
+.row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+#enrollPrompt { font-size: 20px; font-weight: 700; margin: 8px 0 0; }
+.note { color: var(--muted); font-size: 14px; margin: 8px 0 0; }
+
+.drawer { position: fixed; inset: 0; z-index: 20; background: var(--bg); overflow-y: auto;
+  padding-block: calc(14px + env(safe-area-inset-top, 0px)) calc(24px + env(safe-area-inset-bottom, 0px));
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.drawer-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }
+.drawer-head h2 { margin: 0; font-size: 20px; }
+@media (max-aspect-ratio: 1/1) {
+  .main { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
+  .picker { grid-template-rows: auto auto auto; }
+  .key { min-height: clamp(46px, 6.5vh, 76px); }
+}
+@media (max-width: 560px) {
+  .top { grid-template-columns: minmax(0, 1fr) auto; }
+  .phase { grid-column: 1 / -1; grid-row: 2; }
+  .actions { grid-template-columns: 1.5fr 1fr 1fr; gap: 8px; }
+  .act { font-size: 15px; padding: 4px 6px; }
+  .act.primary { font-size: 17px; }
+}
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div class="round"><span class="lbl">回合</span><span id="roundNo">—</span></div>
+    <div class="phase" id="phaseBox" data-phase="idle"><span id="phaseText">待開始</span><span id="countdown"></span></div>
+    <button class="gear" id="btnDrawer" type="button">設定</button>
+  </header>
+
+  <div class="main">
+  <section class="table" aria-label="牌位">
+    <div class="slot" data-side="sideA" id="slot0"><h2>紅方</h2><div class="face empty" id="face0">第一張</div><div class="tag" id="tag0"></div></div>
+    <div class="slot" data-side="sideB" id="slot1"><h2>藍方</h2><div class="face empty" id="face1">第二張</div><div class="tag" id="tag1"></div></div>
+  </section>
+
+  <section class="picker off" id="picker" aria-label="輸入牌">
+    <h3 id="pickTitle">可以出牌之後，在這裡點花色與點數</h3>
+    <div class="suits" id="suits"></div>
+    <div class="ranks" id="ranks"></div>
+  </section>
+  </div>
+
+  <div id="toast" role="status" aria-live="polite"></div>
+
+  <section class="actions">
+    <button class="act primary" id="btnMain" type="button">開始</button>
+    <button class="act" id="btnRedo" type="button" disabled>重新輸入</button>
+    <button class="act danger" id="btnVoid" type="button" disabled>取消回合</button>
+  </section>
+
+  <div class="drawer" id="drawer" hidden>
+  <div class="drawer-head"><h2>設定與紀錄</h2><button class="small" id="btnDrawerClose" type="button">回到主持台</button></div>
+  <p class="demo" style="margin:0 0 12px">示範模式：這一頁自己計時、自己判定，沒有連到任何伺服器。</p>
+  <section class="lower">
+    <div class="panel">
+      <h3>最近的回合</h3>
+      <div class="tally"><span class="d">紅 <span id="nD">0</span></span><span class="t">藍 <span id="nT">0</span></span><span class="e">平 <span id="nE">0</span></span></div>
+      <div class="logwrap" id="logWrap"><p class="empty-note">結束的回合會列在這裡，最新的在最上面。</p></div>
+    </div>
+
+    <div class="panel">
+      <h3>設定</h3>
+      <label class="field" for="setCount"><span>倒數秒數</span><input id="setCount" type="number" min="5" max="120" inputmode="numeric"></label>
+      <label class="field" for="setBuffer"><span>截止後的等待秒數</span><input id="setBuffer" type="number" min="0" max="30" inputmode="numeric"></label>
+      <label class="field" for="setAuto"><span>結束後自動開下一回合</span><input id="setAuto" type="checkbox"></label>
+      <p class="note">改動從下一回合開始生效。</p>
+    </div>
+
+    <div class="panel">
+      <h3>NFC 感應</h3>
+      <div class="row" style="margin:0 0 10px"><button class="small" id="btnWebNfc" type="button">用這台 Android 手機感應</button></div>
+      <p class="note" id="webNfcStatus" style="margin:0 0 10px">手機感應尚未開啟。</p>
+      <p class="empty-note" id="enrollStatus">尚未登錄牌組。</p>
+      <p id="enrollPrompt" hidden></p>
+      <div class="row">
+        <button class="small" id="btnEnroll" type="button">開始登錄牌組</button>
+        <button class="small" id="btnEnrollClear" type="button">清除登錄</button>
+      </div>
+      <p class="note">開啟手機感應，或接上鍵盤模式的讀卡機後，照畫面指示把 52 張牌各感應一次。登錄完成後，出牌時感應就等於點牌。登錄資料只存在這台裝置。</p>
+    </div>
+  </section>
+  </div>
+</div>
+
+<script>
+(function () {
+  var SUITS = [
+    { k: 'S', s: '♠', n: '黑桃', red: false },
+    { k: 'H', s: '♥', n: '紅心', red: true },
+    { k: 'D', s: '♦', n: '方塊', red: true },
+    { k: 'C', s: '♣', n: '梅花', red: false }
+  ];
+  var RANKS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+  var SIDES = ['紅方', '藍方'];
+  var SETTLED_HOLD_SECONDS = 6;
+  var VOID_HOLD_SECONDS = 4;
+
+  function $(id) { return document.getElementById(id); }
+  function suitOf(card) { for (var i = 0; i < SUITS.length; i++) if (SUITS[i].k === card[0]) return SUITS[i]; }
+  function rankOf(card) { return card.slice(1); }
+  function rankValue(card) { return RANKS.indexOf(rankOf(card)) + 1; }
+  function cardLabel(card) { return suitOf(card).s + rankOf(card); }
+  function allCards() { var out = []; SUITS.forEach(function (s) { RANKS.forEach(function (r) { out.push(s.k + r); }); }); return out; }
+
+  function load(key, fallback) { try { var raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : fallback; } catch (error) { return fallback; } }
+  function save(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); } catch (error) { /* storage unavailable: carry on in memory */ } }
+
+  var state = {
+    phase: 'idle',           // idle | counting | closed | dealing | confirm | settled | void
+    sequence: 0,
+    roundNo: '',
+    deadline: 0,
+    cards: [null, null],
+    pickSuit: null,
+    pickRank: null,
+    result: null,
+    log: [],
+    settings: load('tapduel-settings', { count: 20, buffer: 5, auto: true }),
+    tagMap: load('tapduel-tagmap', {}),
+    enroll: null             // { index, map } while enrolling
+  };
+
+  function start(carried) {
+    if (carried && carried.log) { state.log = carried.log; state.sequence = carried.sequence || 0; }
+    buildPicker();
+    $('setCount').value = state.settings.count;
+    $('setBuffer').value = state.settings.buffer;
+    $('setAuto').checked = !!state.settings.auto;
+    render();
+    setInterval(tick, 200);
+  }
+
+  /* ---------- round state machine ---------- */
+  function seconds(n) { return Date.now() + n * 1000; }
+  function remaining() { return Math.max(0, Math.ceil((state.deadline - Date.now()) / 1000)); }
+
+  function openRound() {
+    var now = new Date();
+    state.sequence += 1;
+    state.roundNo = 'R' + String(now.getMonth() + 1).padStart(2, '0') + String(now.getDate()).padStart(2, '0') + '-' + String(state.sequence).padStart(3, '0');
+    state.cards = [null, null];
+    state.pickSuit = state.pickRank = null;
+    state.result = null;
+    state.phase = 'counting';
+    state.deadline = seconds(state.settings.count);
+    say('');
+    keepAwake();
+    render();
+  }
+
+  function tick() {
+    if (state.phase === 'counting' && Date.now() >= state.deadline) {
+      state.phase = 'closed';
+      state.deadline = seconds(state.settings.buffer);
+    }
+    if (state.phase === 'closed' && Date.now() >= state.deadline) {
+      state.phase = 'dealing';
+    }
+    if ((state.phase === 'settled' || state.phase === 'void') && state.settings.auto && Date.now() >= state.deadline) {
+      openRound();
+      return;
+    }
+    render();
+  }
+
+  function inputCard(card) {
+    if (state.phase === 'confirm') { say('兩張牌都已輸入。要改請按「重新輸入」。'); return; }
+    if (state.phase !== 'dealing') { say('還不能出牌，這次輸入沒有算。請等畫面顯示「可以出牌」。'); return; }
+    if (state.cards[0] === card) { say(cardLabel(card) + ' 這一回合已經出現在紅方。請確認是不是同一張牌感應了兩次。'); state.pickSuit = state.pickRank = null; render(); return; }
+    var position = state.cards[0] ? 1 : 0;
+    state.cards[position] = card;
+    state.pickSuit = state.pickRank = null;
+    say(SIDES[position] + '：' + cardLabel(card));
+    if (position === 1) state.phase = 'confirm';
+    render();
+  }
+
+  function redo() {
+    if (state.phase !== 'dealing' && state.phase !== 'confirm') return;
+    state.cards = [null, null];
+    state.pickSuit = state.pickRank = null;
+    state.phase = 'dealing';
+    say('已清掉兩張牌，請從紅方重新輸入。');
+    render();
+  }
+
+  function settle() {
+    var sideA = rankValue(state.cards[0]), sideB = rankValue(state.cards[1]);
+    state.result = sideA > sideB ? 'sideA' : sideB > sideA ? 'sideB' : 'tie';
+    state.log.unshift({ roundNo: state.roundNo, sideA: state.cards[0], sideB: state.cards[1], result: state.result });
+    state.phase = 'settled';
+    state.deadline = seconds(SETTLED_HOLD_SECONDS);
+    say('');
+    render();
+  }
+
+  function voidRound() {
+    state.log.unshift({ roundNo: state.roundNo, sideA: state.cards[0], sideB: state.cards[1], result: 'void' });
+    state.result = 'void';
+    state.phase = 'void';
+    state.deadline = seconds(VOID_HOLD_SECONDS);
+    say('這一回合已取消。');
+    render();
+  }
+
+  /* ---------- picker ---------- */
+  function buildPicker() {
+    SUITS.forEach(function (suit) {
+      var button = document.createElement('button');
+      button.type = 'button'; button.className = 'key suit' + (suit.red ? ' red' : '');
+      button.textContent = suit.s; button.setAttribute('aria-label', suit.n); button.dataset.suit = suit.k;
+      button.addEventListener('click', function () { pick('pickSuit', suit.k); });
+      $('suits').appendChild(button);
+    });
+    RANKS.forEach(function (rank) {
+      var button = document.createElement('button');
+      button.type = 'button'; button.className = 'key'; button.textContent = rank; button.dataset.rank = rank;
+      button.addEventListener('click', function () { pick('pickRank', rank); });
+      $('ranks').appendChild(button);
+    });
+  }
+  function pick(field, value) {
+    if (state.phase !== 'dealing') { inputCard('SA'); return; } // reuse the refusal message; nothing is recorded outside dealing
+    state[field] = state[field] === value ? null : value;
+    if (state.pickSuit && state.pickRank) inputCard(state.pickSuit + state.pickRank);
+    else render();
+  }
+
+  /* ---------- NFC reader in keyboard mode: a fast burst of characters ending in Enter ---------- */
+  var burst = '', lastKeyAt = 0;
+  document.addEventListener('keydown', function (event) {
+    if (event.target && event.target.matches && event.target.matches('input, textarea, select')) return;
+    var now = performance.now();
+    if (now - lastKeyAt > 120) burst = '';
+    lastKeyAt = now;
+    if (event.key === 'Enter') { if (burst.length >= 4) { event.preventDefault(); onTag(burst); } burst = ''; return; }
+    if (event.key.length === 1) burst += event.key;
+  });
+
+  /* ---------- Web NFC: Android Chrome only, top-level HTTPS page only ---------- */
+  var lastTag = '', lastTagAt = 0;
+  function startWebNfc() {
+    var status = $('webNfcStatus');
+    if (!('NDEFReader' in window)) { status.textContent = '這個瀏覽器不能直接感應。需要 Android 的 Chrome；iPad 與 iPhone 請用鍵盤模式讀卡機或手點。'; return; }
+    var reader;
+    try { reader = new NDEFReader(); } catch (error) { status.textContent = '無法啟動感應：' + error.message; return; }
+    reader.scan().then(function () {
+      status.textContent = '手機感應已開啟。把牌貼近手機背面。';
+      $('btnWebNfc').disabled = true;
+      reader.onreading = function (event) {
+        var now = Date.now();
+        if (event.serialNumber === lastTag && now - lastTagAt < 1500) return;
+        lastTag = event.serialNumber; lastTagAt = now;
+        if (!event.serialNumber) { say('讀到貼紙但拿不到卡號，請再感應一次。'); return; }
+        onTag(event.serialNumber);
+      };
+      reader.onreadingerror = function () { say('讀不到這張貼紙，請拿開再感應一次。'); };
+    }).catch(function (error) {
+      status.textContent = '瀏覽器拒絕了感應（' + error.name + '）。這一頁嵌在框架裡或不是 HTTPS 時會這樣，要放到自己的網址才能用。';
+    });
+  }
+
+  function onTag(tagId) {
+    if (state.enroll) { enrollTag(tagId); return; }
+    var card = state.tagMap[tagId];
+    if (!card) { say('這張貼紙沒有登錄過（' + tagId + '）。請先登錄牌組，或改用手點。'); return; }
+    inputCard(card);
+  }
+  function enrollTag(tagId) {
+    var deck = allCards();
+    if (state.enroll.map[tagId]) { say('這張貼紙剛才已登錄為 ' + cardLabel(state.enroll.map[tagId]) + '，請換下一張牌。'); return; }
+    state.enroll.map[tagId] = deck[state.enroll.index];
+    state.enroll.index += 1;
+    if (state.enroll.index >= deck.length) {
+      state.tagMap = state.enroll.map; save('tapduel-tagmap', state.tagMap); state.enroll = null;
+      say('52 張牌登錄完成。');
+    }
+    render();
+  }
+
+  /* ---------- small helpers ---------- */
+  var toastTimer = null;
+  function say(text) {
+    var toast = $('toast');
+    toast.textContent = text; toast.classList.toggle('show', !!text);
+    clearTimeout(toastTimer);
+    if (text) toastTimer = setTimeout(function () { toast.textContent = ''; toast.classList.remove('show'); }, 6000);
+  }
+  function keepAwake() {
+    try { if (navigator.wakeLock) navigator.wakeLock.request('screen').catch(function () {}); } catch (error) { /* not available here */ }
+  }
+  var voidArmedUntil = 0;
+
+  /* ---------- render ---------- */
+  var PHASE_TEXT = { idle: '待開始', counting: '倒數中', closed: '已截止，請等待', dealing: '可以出牌', confirm: '請核對後確認', settled: '回合結束', void: '回合取消' };
+  var RESULT_TEXT = { sideA: '紅方勝', sideB: '藍方勝', tie: '平手', void: '取消' };
+
+  function render() {
+    var phase = state.phase;
+    $('roundNo').textContent = state.roundNo || '—';
+    $('phaseBox').dataset.phase = phase;
+    $('phaseText').textContent = phase === 'settled' ? '回合結束 · ' + RESULT_TEXT[state.result] : PHASE_TEXT[phase];
+    var showCount = phase === 'counting' || phase === 'closed' || ((phase === 'settled' || phase === 'void') && state.settings.auto);
+    $('countdown').textContent = showCount ? remaining() : '';
+
+    for (var position = 0; position < 2; position++) {
+      var card = state.cards[position], face = $('face' + position), slot = $('slot' + position);
+      if (card) {
+        face.className = 'face filled' + (suitOf(card).red ? ' red' : '');
+        face.innerHTML = '<span class="r"></span><span class="s"></span>';
+        face.firstChild.textContent = rankOf(card); face.lastChild.textContent = suitOf(card).s;
+      } else {
+        face.className = 'face empty'; face.textContent = position === 0 ? '第一張' : '第二張';
+      }
+      var activePosition = phase === 'dealing' ? (state.cards[0] ? 1 : 0) : -1;
+      slot.classList.toggle('active', activePosition === position);
+      var won = phase === 'settled' && ((state.result === 'sideA' && position === 0) || (state.result === 'sideB' && position === 1));
+      slot.classList.toggle('win', won);
+      $('tag' + position).textContent = won ? '贏' : (phase === 'settled' && state.result === 'tie' ? '平' : (activePosition === position ? '等這一張' : ''));
+    }
+
+    var dealing = phase === 'dealing';
+    $('picker').classList.toggle('off', !dealing);
+    $('pickTitle').innerHTML = dealing ? '正在輸入：<b>' + SIDES[state.cards[0] ? 1 : 0] + '</b>（點花色與點數，先後不拘）' : '可以出牌之後，在這裡點花色與點數';
+    Array.prototype.forEach.call(document.querySelectorAll('.key'), function (button) {
+      button.classList.toggle('on', dealing && (button.dataset.suit === state.pickSuit || button.dataset.rank === state.pickRank) && (button.dataset.suit ? !!state.pickSuit : !!state.pickRank));
+    });
+
+    var main = $('btnMain');
+    if (phase === 'idle') { main.textContent = '開始'; main.disabled = false; }
+    else if (phase === 'confirm') { main.textContent = '確認結果'; main.disabled = false; }
+    else if (phase === 'settled' || phase === 'void') { main.textContent = '下一回合'; main.disabled = false; }
+    else { main.textContent = phase === 'dealing' ? '等兩張牌' : '等待中'; main.disabled = true; }
+    $('btnRedo').disabled = !((phase === 'dealing' && state.cards[0]) || phase === 'confirm');
+    var canVoid = phase === 'counting' || phase === 'closed' || phase === 'dealing' || phase === 'confirm';
+    var armed = canVoid && Date.now() < voidArmedUntil;
+    $('btnVoid').disabled = !canVoid;
+    $('btnVoid').classList.toggle('armed', armed);
+    $('btnVoid').textContent = armed ? '再按一次取消' : '取消回合';
+
+    renderLog();
+    renderEnroll();
+  }
+
+  function renderLog() {
+    var counts = { sideA: 0, sideB: 0, tie: 0 };
+    state.log.forEach(function (entry) { if (counts[entry.result] !== undefined) counts[entry.result] += 1; });
+    $('nD').textContent = counts.sideA; $('nT').textContent = counts.sideB; $('nE').textContent = counts.tie;
+    if (!state.log.length) return;
+    var rows = state.log.slice(0, 12).map(function (entry) {
+      return '<tr><td>' + entry.roundNo + '</td><td>' + (entry.sideA ? cardLabel(entry.sideA) : '—') + '</td><td>' + (entry.sideB ? cardLabel(entry.sideB) : '—') + '</td><td class="res-' + entry.result + '">' + RESULT_TEXT[entry.result] + '</td></tr>';
+    }).join('');
+    $('logWrap').innerHTML = '<table><thead><tr><th>回合</th><th>紅方</th><th>藍方</th><th>結果</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  }
+
+  function renderEnroll() {
+    var count = Object.keys(state.tagMap).length;
+    $('enrollStatus').textContent = count ? '已登錄 ' + count + ' 張牌。' : '尚未登錄牌組。';
+    var prompt = $('enrollPrompt');
+    if (state.enroll) {
+      var card = allCards()[state.enroll.index];
+      prompt.hidden = false;
+      prompt.textContent = '請感應 ' + cardLabel(card) + '（第 ' + (state.enroll.index + 1) + ' / 52 張）';
+      $('btnEnroll').textContent = '取消登錄';
+    } else {
+      prompt.hidden = true;
+      $('btnEnroll').textContent = count ? '重新登錄牌組' : '開始登錄牌組';
+    }
+  }
+
+  /* ---------- wiring ---------- */
+  $('btnMain').addEventListener('click', function () {
+    if (state.phase === 'idle' || state.phase === 'settled' || state.phase === 'void') openRound();
+    else if (state.phase === 'confirm') settle();
+  });
+  $('btnRedo').addEventListener('click', redo);
+  $('btnDrawer').addEventListener('click', function () { $('drawer').hidden = false; });
+  $('btnDrawerClose').addEventListener('click', function () { $('drawer').hidden = true; });
+  $('btnWebNfc').addEventListener('click', startWebNfc);
+  $('btnVoid').addEventListener('click', function () {
+    if (Date.now() < voidArmedUntil) { voidArmedUntil = 0; voidRound(); }
+    else { voidArmedUntil = Date.now() + 3000; render(); }
+  });
+  $('btnEnroll').addEventListener('click', function () {
+    if (state.enroll) { state.enroll = null; say('已取消，原本的登錄沒有變。'); }
+    else if (state.phase !== 'idle' && state.phase !== 'settled' && state.phase !== 'void') { say('回合進行中不能登錄牌組，請等這一回合結束。'); }
+    else { state.enroll = { index: 0, map: {} }; }
+    render();
+  });
+  $('btnEnrollClear').addEventListener('click', function () { state.tagMap = {}; state.enroll = null; save('tapduel-tagmap', {}); say('已清除登錄。'); render(); });
+  function readSettings() {
+    var count = parseInt($('setCount').value, 10), buffer = parseInt($('setBuffer').value, 10);
+    state.settings = {
+      count: isNaN(count) ? 20 : Math.min(120, Math.max(5, count)),
+      buffer: isNaN(buffer) ? 5 : Math.min(30, Math.max(0, buffer)),
+      auto: $('setAuto').checked
+    };
+    save('tapduel-settings', state.settings);
+  }
+  ['setCount', 'setBuffer', 'setAuto'].forEach(function (id) { $(id).addEventListener('change', readSettings); });
+
+  var hot = window.claude && window.claude.hot;
+  if (hot && hot.snapshot) hot.snapshot(function () { return { log: state.log, sequence: state.sequence }; });
+  if (hot && hot.ready) hot.ready(start); else start((hot && hot.data) || {});
+})();
+</script>
+
+</body>
+</html>
