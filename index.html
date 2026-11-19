@@ -72,6 +72,9 @@ button:focus-visible, summary:focus-visible, input:focus-visible { outline: 3px 
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   background: var(--surface-2); border: 2px solid var(--line);
 }
+.phase-main { display: flex; flex-direction: column; min-width: 0; }
+#txLine { font-size: 13px; line-height: 1.3; font-weight: 500; opacity: .85; }
+#payloadView { margin: 8px 0 0; padding: 10px; border-radius: 8px; background: var(--surface-2); font-size: 12px; line-height: 1.5; overflow-x: auto; white-space: pre; -webkit-user-select: text; user-select: text; }
 #phaseText { font-weight: 700; font-size: clamp(20px, 4vw, 38px); line-height: 1.2; }
 #countdown { font-family: var(--font-num); font-weight: 700; font-size: clamp(30px, 6vw, 56px); line-height: 1; font-variant-numeric: tabular-nums; }
 .phase[data-phase="counting"] { border-color: var(--fg); }
@@ -191,7 +194,7 @@ summary { cursor: pointer; padding: 8px 0; font-weight: 500; }
 <div class="wrap">
   <header class="top">
     <div class="round"><span class="lbl">回合</span><span id="roundNo">—</span></div>
-    <div class="phase" id="phaseBox" data-phase="idle"><span id="phaseText">待開始</span><span id="countdown"></span></div>
+    <div class="phase" id="phaseBox" data-phase="idle"><div class="phase-main"><span id="phaseText">待開始</span><span id="txLine">UGPP：待命</span></div><span id="countdown"></span></div>
     <button class="gear" id="btnDrawer" type="button">設定</button>
   </header>
 
@@ -234,6 +237,15 @@ summary { cursor: pointer; padding: 8px 0; font-weight: 500; }
       <label class="field" for="setBuffer"><span>截止後的等待秒數</span><input id="setBuffer" type="number" min="0" max="30" inputmode="numeric"></label>
       <label class="field" for="setAuto"><span>結束後自動開下一回合</span><input id="setAuto" type="checkbox"></label>
       <p class="note">改動從下一回合開始生效。</p>
+    </div>
+
+    <div class="panel">
+      <h3>傳送結果至 UGPP</h3>
+      <p class="empty-note" id="txStatus">UGPP：待命</p>
+      <label class="field" for="setFailTx"><span>模擬傳送失敗</span><input id="setFailTx" type="checkbox"></label>
+      <p class="note">目前是模擬：還沒有接上 UGPP，資料不會離開這一頁。每回合結束（含取消）會傳送一次，失敗自動重試到第 3 次，仍失敗就停住等你按「重送結果」。送達前不會開下一回合。</p>
+      <p class="note" style="margin-top:12px">最後一次傳送的內容</p>
+      <pre id="payloadView">還沒有傳送過。</pre>
     </div>
 
     <div class="panel">
@@ -296,7 +308,8 @@ summary { cursor: pointer; padding: 8px 0; font-weight: 500; }
     tagMap: load('tapduel-tagmap', {}),
     pendingTag: null,        // an unknown IC tapped while dealing, waiting for the host to say which card it is
     enroll: null,            // { index, fill, single } while the settings page is waiting for a tap
-    enrollNote: ''
+    enrollNote: '',
+    tx: { status: 'idle', attempts: 0, payload: null, entry: null, took: 0 }   // sending the finished round to UGPP
   };
 
   function start() {
@@ -307,6 +320,7 @@ summary { cursor: pointer; padding: 8px 0; font-weight: 500; }
     $('setCount').value = state.settings.count;
     $('setBuffer').value = state.settings.buffer;
     $('setAuto').checked = !!state.settings.auto;
+    $('setFailTx').checked = !!state.settings.failTx;
     render();
     setInterval(tick, 200);
   }
@@ -341,7 +355,8 @@ summary { cursor: pointer; padding: 8px 0; font-weight: 500; }
     if (state.phase === 'closed' && Date.now() >= state.deadline) {
       state.phase = 'dealing';
     }
-    if ((state.phase === 'settled' || state.phase === 'void') && state.settings.auto && Date.now() >= state.deadline) {
+    // The next round never starts until the finished one has been delivered.
+    if ((state.phase === 'settled' || state.phase === 'void') && state.settings.auto && state.tx.status === 'sent' && Date.now() >= state.deadline) {
       openRound();
       return;
     }
@@ -375,9 +390,56 @@ summary { cursor: pointer; padding: 8px 0; font-weight: 500; }
 
   var LOG_LIMIT = 500;
   function record(result) {
-    state.log.unshift({ roundNo: state.roundNo, at: Date.now(), sideA: state.cards[0], tagA: state.tags[0], sideB: state.cards[1], tagB: state.tags[1], result: result });
+    var entry = { roundNo: state.roundNo, at: Date.now(), sideA: state.cards[0], tagA: state.tags[0], sideB: state.cards[1], tagB: state.tags[1], result: result, sent: false };
+    state.log.unshift(entry);
     if (state.log.length > LOG_LIMIT) state.log.length = LOG_LIMIT;
     save('tapduel-log', state.log);
+    transmit(entry);
+  }
+
+  /* ---------- sending the result to UGPP (simulated: nothing leaves this page yet) ---------- */
+  var TX_MAX_ATTEMPTS = 3, TX_RETRY_MS = 1000;
+  function buildPayload(entry) {
+    function side(card, tagId) { return card ? { card: card, ic: tagId || null, input: tagId ? 'ic' : 'manual' } : null; }
+    return { roundNo: entry.roundNo, endedAt: new Date(entry.at).toISOString(), result: entry.result, sideA: side(entry.sideA, entry.tagA), sideB: side(entry.sideB, entry.tagB) };
+  }
+  function transmit(entry) {
+    state.tx = { status: 'sending', attempts: 0, payload: buildPayload(entry), entry: entry, took: 0, startedAt: Date.now() };
+    attemptSend();
+  }
+  function attemptSend() {
+    var tx = state.tx;
+    tx.attempts += 1;
+    tx.status = tx.attempts === 1 ? 'sending' : 'retrying';
+    render();
+    // Stand-in for the real request: replace this timer with the call to UGPP and keep the two outcomes below.
+    var fails = state.settings.failTx && tx.attempts < TX_MAX_ATTEMPTS + 1 && !tx.forced;
+    setTimeout(function () {
+      if (state.tx !== tx) return;
+      if (!fails) {
+        tx.status = 'sent'; tx.took = Date.now() - tx.startedAt;
+        tx.entry.sent = true; save('tapduel-log', state.log);
+        state.deadline = Math.max(state.deadline, Date.now() + 1500);
+      } else if (tx.attempts < TX_MAX_ATTEMPTS) {
+        setTimeout(function () { if (state.tx === tx) attemptSend(); }, TX_RETRY_MS);
+      } else {
+        tx.status = 'failed';
+      }
+      render();
+    }, 400 + Math.floor(Math.random() * 500));
+  }
+  function resend() {
+    if (state.tx.status !== 'failed') return;
+    state.tx.attempts = 0; state.tx.forced = !state.settings.failTx; state.tx.startedAt = Date.now();
+    attemptSend();
+  }
+  function txText() {
+    var tx = state.tx;
+    if (tx.status === 'sending') return 'UGPP：傳送中…';
+    if (tx.status === 'retrying') return 'UGPP：傳送失敗，重試中（第 ' + tx.attempts + ' 次）';
+    if (tx.status === 'sent') return 'UGPP：' + tx.payload.roundNo + ' 已送達（' + (tx.took / 1000).toFixed(1) + ' 秒）';
+    if (tx.status === 'failed') return 'UGPP：傳送失敗，請按「重送結果」';
+    return 'UGPP：待命';
   }
 
   function settle() {
@@ -580,10 +642,18 @@ summary { cursor: pointer; padding: 8px 0; font-weight: 500; }
       button.classList.toggle('on', dealing && (button.dataset.suit === state.pickSuit || button.dataset.rank === state.pickRank) && (button.dataset.suit ? !!state.pickSuit : !!state.pickRank));
     });
 
+    $('txLine').textContent = txText();
+    $('txStatus').textContent = txText();
+    var payloadText = state.tx.payload ? JSON.stringify(state.tx.payload, null, 2) : '還沒有傳送過。';
+    if ($('payloadView').textContent !== payloadText) $('payloadView').textContent = payloadText;
     var main = $('btnMain');
     if (phase === 'idle') { main.textContent = '開始'; main.disabled = false; }
     else if (phase === 'confirm') { main.textContent = '確認結果'; main.disabled = false; }
-    else if (phase === 'settled' || phase === 'void') { main.textContent = '下一回合'; main.disabled = false; }
+    else if (phase === 'settled' || phase === 'void') {
+      var txStatus = state.tx.status;
+      main.textContent = txStatus === 'failed' ? '重送結果' : txStatus === 'sent' ? '下一回合' : '傳送中';
+      main.disabled = txStatus !== 'failed' && txStatus !== 'sent';
+    }
     else { main.textContent = phase === 'dealing' ? '等兩張牌' : '等待中'; main.disabled = true; }
     $('btnRedo').disabled = !((phase === 'dealing' && (state.cards[0] || state.pendingTag)) || phase === 'confirm');
     var canVoid = phase === 'counting' || phase === 'closed' || phase === 'dealing' || phase === 'confirm';
@@ -606,7 +676,7 @@ summary { cursor: pointer; padding: 8px 0; font-weight: 500; }
       return '<td>' + cardLabel(card) + '<span class="ic">' + (tagId ? 'IC ' + escapeHtml(tagId) : '手動輸入') + '</span></td>';
     }
     var rows = state.log.slice(0, 50).map(function (entry) {
-      return '<tr><td>' + escapeHtml(entry.roundNo) + '<span class="ic">' + (entry.at ? timeText(entry.at) : '') + '</span></td>' + cell(entry.sideA, entry.tagA) + cell(entry.sideB, entry.tagB) + '<td class="res-' + entry.result + '">' + RESULT_TEXT[entry.result] + '</td></tr>';
+      return '<tr><td>' + escapeHtml(entry.roundNo) + '<span class="ic">' + (entry.at ? timeText(entry.at) : '') + '</span></td>' + cell(entry.sideA, entry.tagA) + cell(entry.sideB, entry.tagB) + '<td class="res-' + entry.result + '">' + RESULT_TEXT[entry.result] + '<span class="ic">' + (entry.sent ? '已送達' : '未送達') + '</span></td></tr>';
     }).join('');
     $('logWrap').innerHTML = '<table><thead><tr><th>回合</th><th>紅方</th><th>藍方</th><th>結果</th></tr></thead><tbody>' + rows + '</tbody></table>'
       + (state.log.length > 50 ? '<p class="note">只顯示最近 50 回合，共記錄 ' + state.log.length + ' 回合；「複製紀錄」會複製全部。</p>' : '');
@@ -637,7 +707,8 @@ summary { cursor: pointer; padding: 8px 0; font-weight: 500; }
 
   /* ---------- wiring ---------- */
   $('btnMain').addEventListener('click', function () {
-    if (state.phase === 'idle' || state.phase === 'settled' || state.phase === 'void') openRound();
+    if (state.phase === 'idle') openRound();
+    else if (state.phase === 'settled' || state.phase === 'void') { if (state.tx.status === 'failed') resend(); else if (state.tx.status === 'sent') openRound(); }
     else if (state.phase === 'confirm') settle();
   });
   $('btnRedo').addEventListener('click', redo);
@@ -682,7 +753,8 @@ summary { cursor: pointer; padding: 8px 0; font-weight: 500; }
     state.settings = {
       count: isNaN(count) ? 20 : Math.min(120, Math.max(5, count)),
       buffer: isNaN(buffer) ? 5 : Math.min(30, Math.max(0, buffer)),
-      auto: $('setAuto').checked
+      auto: $('setAuto').checked,
+      failTx: $('setFailTx').checked
     };
     save('tapduel-settings', state.settings);
   }
@@ -692,15 +764,15 @@ summary { cursor: pointer; padding: 8px 0; font-weight: 500; }
     else { clearArmedUntil = Date.now() + 3000; $('btnLogClear').textContent = '再按一次清除'; setTimeout(function () { $('btnLogClear').textContent = '清除紀錄'; }, 3000); }
   });
   $('btnLogCopy').addEventListener('click', function () {
-    var lines = ['回合,時間,紅方,紅方IC,藍方,藍方IC,結果'].concat(state.log.map(function (entry) {
-      return [entry.roundNo, entry.at ? new Date(entry.at).toISOString() : '', entry.sideA ? cardLabel(entry.sideA) : '', entry.tagA || '', entry.sideB ? cardLabel(entry.sideB) : '', entry.tagB || '', RESULT_TEXT[entry.result]].join(',');
+    var lines = ['回合,時間,紅方,紅方IC,藍方,藍方IC,結果,傳送'].concat(state.log.map(function (entry) {
+      return [entry.roundNo, entry.at ? new Date(entry.at).toISOString() : '', entry.sideA ? cardLabel(entry.sideA) : '', entry.tagA || '', entry.sideB ? cardLabel(entry.sideB) : '', entry.tagB || '', RESULT_TEXT[entry.result], entry.sent ? '已送達' : '未送達'].join(',');
     }));
     var button = $('btnLogCopy');
     function done(text) { button.textContent = text; setTimeout(function () { button.textContent = '複製紀錄'; }, 2500); }
     try { navigator.clipboard.writeText(lines.join('\n')).then(function () { done('已複製 ' + state.log.length + ' 回合'); }, function () { done('這個瀏覽器不允許複製'); }); }
     catch (error) { done('這個瀏覽器不允許複製'); }
   });
-  ['setCount', 'setBuffer', 'setAuto'].forEach(function (id) { $(id).addEventListener('change', readSettings); });
+  ['setCount', 'setBuffer', 'setAuto', 'setFailTx'].forEach(function (id) { $(id).addEventListener('change', readSettings); });
 
   start();
 })();
