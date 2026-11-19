@@ -105,7 +105,7 @@ button:focus-visible, summary:focus-visible, input:focus-visible { outline: 3px 
 .face.filled.red { color: var(--card-red); }
 .face .r { font-size: clamp(28px, 9vmin, 72px); }
 .face .s { font-size: clamp(24px, 7vmin, 56px); }
-.slot .tag { height: 20px; line-height: 20px; font-size: 14px; color: var(--muted); }
+.slot .tag { height: 20px; line-height: 20px; font-size: 13px; color: var(--muted); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .slot.win .tag { color: var(--fg); font-weight: 700; }
 
 /* Picker */
@@ -151,6 +151,12 @@ td.res-sideA { color: var(--sideA); font-weight: 700; }
 td.res-sideB { color: var(--sideB); font-weight: 700; }
 td.res-tie { color: var(--tie); font-weight: 700; }
 td.res-void { color: var(--muted); }
+td { vertical-align: top; }
+.ic { display: block; font-size: 12px; color: var(--muted); font-weight: 400; }
+.deck { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 4px 12px; margin-top: 10px; font-size: 14px; font-variant-numeric: tabular-nums; }
+.deck b { display: inline-block; min-width: 38px; }
+.deck span { color: var(--muted); overflow-wrap: anywhere; }
+summary { cursor: pointer; padding: 8px 0; font-weight: 500; }
 .empty-note { color: var(--muted); font-size: 15px; margin: 0; }
 .field { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; border-top: 1px solid var(--line); }
 .field:first-of-type { border-top: 0; }
@@ -216,6 +222,8 @@ td.res-void { color: var(--muted); }
       <h3>最近的回合</h3>
       <div class="tally"><span class="d">紅 <span id="nD">0</span></span><span class="t">藍 <span id="nT">0</span></span><span class="e">平 <span id="nE">0</span></span></div>
       <div class="logwrap" id="logWrap"><p class="empty-note">結束的回合會列在這裡，最新的在最上面。</p></div>
+      <div class="row"><button class="small" id="btnLogCopy" type="button">複製紀錄</button><button class="small" id="btnLogClear" type="button">清除紀錄</button></div>
+      <p class="note">紀錄存在這台裝置的瀏覽器裡，最多 500 回合。每張牌下方是它的 IC 卡號，手點的會標「手動輸入」。</p>
     </div>
 
     <div class="panel">
@@ -236,6 +244,7 @@ td.res-void { color: var(--muted); }
         <button class="small" id="btnEnroll" type="button">開始登錄牌組</button>
         <button class="small" id="btnEnrollClear" type="button">清除登錄</button>
       </div>
+      <details id="deckDetails"><summary>已登錄的牌與 IC 卡號</summary><div class="deck" id="deckList"></div></details>
       <p class="note">開啟手機感應，或接上鍵盤模式的讀卡機後，照畫面指示把 52 張牌各感應一次。登錄完成後，出牌時感應就等於點牌。登錄資料只存在這台裝置。</p>
     </div>
   </section>
@@ -262,6 +271,9 @@ td.res-void { color: var(--muted); }
   function cardLabel(card) { return suitOf(card).s + rankOf(card); }
   function allCards() { var out = []; SUITS.forEach(function (s) { RANKS.forEach(function (r) { out.push(s.k + r); }); }); return out; }
 
+  function dayKey() { var now = new Date(); return String(now.getMonth() + 1).padStart(2, '0') + String(now.getDate()).padStart(2, '0'); }
+  function escapeHtml(text) { return String(text).replace(/[&<>"']/g, function (ch) { return '&#' + ch.charCodeAt(0) + ';'; }); }
+  function timeText(ms) { var d = new Date(ms); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0') + ':' + String(d.getSeconds()).padStart(2, '0'); }
   function load(key, fallback) { try { var raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : fallback; } catch (error) { return fallback; } }
   function save(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); } catch (error) { /* storage unavailable: carry on in memory */ } }
 
@@ -271,17 +283,19 @@ td.res-void { color: var(--muted); }
     roundNo: '',
     deadline: 0,
     cards: [null, null],
+    tags: [null, null],      // IC number each card came from; null when tapped by hand
     pickSuit: null,
     pickRank: null,
     result: null,
-    log: [],
+    log: load('tapduel-log', []),
     settings: load('tapduel-settings', { count: 20, buffer: 5, auto: true }),
     tagMap: load('tapduel-tagmap', {}),
     enroll: null             // { index, map } while enrolling
   };
 
-  function start(carried) {
-    if (carried && carried.log) { state.log = carried.log; state.sequence = carried.sequence || 0; }
+  function start() {
+    var counter = load('tapduel-sequence', null);
+    if (counter && counter.day === dayKey()) state.sequence = counter.sequence;
     buildPicker();
     $('setCount').value = state.settings.count;
     $('setBuffer').value = state.settings.buffer;
@@ -295,10 +309,13 @@ td.res-void { color: var(--muted); }
   function remaining() { return Math.max(0, Math.ceil((state.deadline - Date.now()) / 1000)); }
 
   function openRound() {
-    var now = new Date();
+    var counter = load('tapduel-sequence', null);
+    if (!counter || counter.day !== dayKey()) state.sequence = 0;
     state.sequence += 1;
-    state.roundNo = 'R' + String(now.getMonth() + 1).padStart(2, '0') + String(now.getDate()).padStart(2, '0') + '-' + String(state.sequence).padStart(3, '0');
+    save('tapduel-sequence', { day: dayKey(), sequence: state.sequence });
+    state.roundNo = 'R' + dayKey() + '-' + String(state.sequence).padStart(3, '0');
     state.cards = [null, null];
+    state.tags = [null, null];
     state.pickSuit = state.pickRank = null;
     state.result = null;
     state.phase = 'counting';
@@ -323,14 +340,15 @@ td.res-void { color: var(--muted); }
     render();
   }
 
-  function inputCard(card) {
+  function inputCard(card, tagId) {
     if (state.phase === 'confirm') { say('兩張牌都已輸入。要改請按「重新輸入」。'); return; }
     if (state.phase !== 'dealing') { say('還不能出牌，這次輸入沒有算。請等畫面顯示「可以出牌」。'); return; }
     if (state.cards[0] === card) { say(cardLabel(card) + ' 這一回合已經出現在紅方。請確認是不是同一張牌感應了兩次。'); state.pickSuit = state.pickRank = null; render(); return; }
     var position = state.cards[0] ? 1 : 0;
     state.cards[position] = card;
+    state.tags[position] = tagId || null;
     state.pickSuit = state.pickRank = null;
-    say(SIDES[position] + '：' + cardLabel(card));
+    say(SIDES[position] + '：' + cardLabel(card) + (tagId ? '（IC ' + tagId + '）' : '（手動輸入）'));
     if (position === 1) state.phase = 'confirm';
     render();
   }
@@ -338,16 +356,24 @@ td.res-void { color: var(--muted); }
   function redo() {
     if (state.phase !== 'dealing' && state.phase !== 'confirm') return;
     state.cards = [null, null];
+    state.tags = [null, null];
     state.pickSuit = state.pickRank = null;
     state.phase = 'dealing';
     say('已清掉兩張牌，請從紅方重新輸入。');
     render();
   }
 
+  var LOG_LIMIT = 500;
+  function record(result) {
+    state.log.unshift({ roundNo: state.roundNo, at: Date.now(), sideA: state.cards[0], tagA: state.tags[0], sideB: state.cards[1], tagB: state.tags[1], result: result });
+    if (state.log.length > LOG_LIMIT) state.log.length = LOG_LIMIT;
+    save('tapduel-log', state.log);
+  }
+
   function settle() {
     var sideA = rankValue(state.cards[0]), sideB = rankValue(state.cards[1]);
     state.result = sideA > sideB ? 'sideA' : sideB > sideA ? 'sideB' : 'tie';
-    state.log.unshift({ roundNo: state.roundNo, sideA: state.cards[0], sideB: state.cards[1], result: state.result });
+    record(state.result);
     state.phase = 'settled';
     state.deadline = seconds(SETTLED_HOLD_SECONDS);
     say('');
@@ -355,7 +381,7 @@ td.res-void { color: var(--muted); }
   }
 
   function voidRound() {
-    state.log.unshift({ roundNo: state.roundNo, sideA: state.cards[0], sideB: state.cards[1], result: 'void' });
+    record('void');
     state.result = 'void';
     state.phase = 'void';
     state.deadline = seconds(VOID_HOLD_SECONDS);
@@ -424,7 +450,7 @@ td.res-void { color: var(--muted); }
     if (state.enroll) { enrollTag(tagId); return; }
     var card = state.tagMap[tagId];
     if (!card) { say('這張 IC 貼紙沒有登錄過（' + tagId + '）。請先登錄牌組，或改用手點。'); return; }
-    inputCard(card);
+    inputCard(card, tagId);
   }
   function enrollTag(tagId) {
     var deck = allCards();
@@ -476,7 +502,9 @@ td.res-void { color: var(--muted); }
       slot.classList.toggle('active', activePosition === position);
       var won = phase === 'settled' && ((state.result === 'sideA' && position === 0) || (state.result === 'sideB' && position === 1));
       slot.classList.toggle('win', won);
-      $('tag' + position).textContent = won ? '贏' : (phase === 'settled' && state.result === 'tie' ? '平' : (activePosition === position ? '等這一張' : ''));
+      var source = card ? (state.tags[position] ? 'IC ' + state.tags[position] : '手動輸入') : '';
+      var outcome = won ? '贏' : (phase === 'settled' && state.result === 'tie' ? '平' : '');
+      $('tag' + position).textContent = card ? (outcome ? outcome + ' · ' : '') + source : (activePosition === position ? '等這一張' : '');
     }
 
     var dealing = phase === 'dealing';
@@ -506,16 +534,26 @@ td.res-void { color: var(--muted); }
     var counts = { sideA: 0, sideB: 0, tie: 0 };
     state.log.forEach(function (entry) { if (counts[entry.result] !== undefined) counts[entry.result] += 1; });
     $('nD').textContent = counts.sideA; $('nT').textContent = counts.sideB; $('nE').textContent = counts.tie;
-    if (!state.log.length) return;
-    var rows = state.log.slice(0, 12).map(function (entry) {
-      return '<tr><td>' + entry.roundNo + '</td><td>' + (entry.sideA ? cardLabel(entry.sideA) : '—') + '</td><td>' + (entry.sideB ? cardLabel(entry.sideB) : '—') + '</td><td class="res-' + entry.result + '">' + RESULT_TEXT[entry.result] + '</td></tr>';
+    if (!state.log.length) { $('logWrap').innerHTML = '<p class="empty-note">結束的回合會列在這裡，最新的在最上面。</p>'; return; }
+    function cell(card, tagId) {
+      if (!card) return '<td>—</td>';
+      return '<td>' + cardLabel(card) + '<span class="ic">' + (tagId ? 'IC ' + escapeHtml(tagId) : '手動輸入') + '</span></td>';
+    }
+    var rows = state.log.slice(0, 50).map(function (entry) {
+      return '<tr><td>' + escapeHtml(entry.roundNo) + '<span class="ic">' + (entry.at ? timeText(entry.at) : '') + '</span></td>' + cell(entry.sideA, entry.tagA) + cell(entry.sideB, entry.tagB) + '<td class="res-' + entry.result + '">' + RESULT_TEXT[entry.result] + '</td></tr>';
     }).join('');
-    $('logWrap').innerHTML = '<table><thead><tr><th>回合</th><th>紅方</th><th>藍方</th><th>結果</th></tr></thead><tbody>' + rows + '</tbody></table>';
+    $('logWrap').innerHTML = '<table><thead><tr><th>回合</th><th>紅方</th><th>藍方</th><th>結果</th></tr></thead><tbody>' + rows + '</tbody></table>'
+      + (state.log.length > 50 ? '<p class="note">只顯示最近 50 回合，共記錄 ' + state.log.length + ' 回合；「複製紀錄」會複製全部。</p>' : '');
   }
 
   function renderEnroll() {
     var count = Object.keys(state.tagMap).length;
     $('enrollStatus').textContent = count ? '已登錄 ' + count + ' 張牌。' : '尚未登錄牌組。';
+    var showing = state.enroll ? state.enroll.map : state.tagMap, byCard = {};
+    Object.keys(showing).forEach(function (tagId) { byCard[showing[tagId]] = tagId; });
+    $('deckList').innerHTML = Object.keys(byCard).length ? allCards().filter(function (card) { return byCard[card]; }).map(function (card) {
+      return '<div><b>' + cardLabel(card) + '</b><span>' + escapeHtml(byCard[card]) + '</span></div>';
+    }).join('') : '<span>還沒有登錄任何牌。</span>';
     var prompt = $('enrollPrompt');
     if (state.enroll) {
       var card = allCards()[state.enroll.index];
@@ -557,11 +595,23 @@ td.res-void { color: var(--muted); }
     };
     save('tapduel-settings', state.settings);
   }
+  var clearArmedUntil = 0;
+  $('btnLogClear').addEventListener('click', function () {
+    if (Date.now() < clearArmedUntil) { clearArmedUntil = 0; state.log = []; save('tapduel-log', []); $('btnLogClear').textContent = '清除紀錄'; render(); }
+    else { clearArmedUntil = Date.now() + 3000; $('btnLogClear').textContent = '再按一次清除'; setTimeout(function () { $('btnLogClear').textContent = '清除紀錄'; }, 3000); }
+  });
+  $('btnLogCopy').addEventListener('click', function () {
+    var lines = ['回合,時間,紅方,紅方IC,藍方,藍方IC,結果'].concat(state.log.map(function (entry) {
+      return [entry.roundNo, entry.at ? new Date(entry.at).toISOString() : '', entry.sideA ? cardLabel(entry.sideA) : '', entry.tagA || '', entry.sideB ? cardLabel(entry.sideB) : '', entry.tagB || '', RESULT_TEXT[entry.result]].join(',');
+    }));
+    var button = $('btnLogCopy');
+    function done(text) { button.textContent = text; setTimeout(function () { button.textContent = '複製紀錄'; }, 2500); }
+    try { navigator.clipboard.writeText(lines.join('\n')).then(function () { done('已複製 ' + state.log.length + ' 回合'); }, function () { done('這個瀏覽器不允許複製'); }); }
+    catch (error) { done('這個瀏覽器不允許複製'); }
+  });
   ['setCount', 'setBuffer', 'setAuto'].forEach(function (id) { $(id).addEventListener('change', readSettings); });
 
-  var hot = window.claude && window.claude.hot;
-  if (hot && hot.snapshot) hot.snapshot(function () { return { log: state.log, sequence: state.sequence }; });
-  if (hot && hot.ready) hot.ready(start); else start((hot && hot.data) || {});
+  start();
 })();
 </script>
 
