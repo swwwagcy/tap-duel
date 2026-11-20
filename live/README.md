@@ -40,21 +40,11 @@ STAFF_KEY=自己定一組密碼 npm start
 
 ## 部署到 Cloud Run
 
-```bash
-gcloud run deploy tap-duel-live \
-  --source live \
-  --region asia-east1 \
-  --allow-unauthenticated \
-  --min-instances 1 --max-instances 1 \
-  --session-affinity --timeout 3600 \
-  --set-env-vars STAFF_KEY=自己定一組密碼
-```
+完整步驟（含密碼、權限、確認、更新、刪除與常見問題）見 **[DEPLOY.md](DEPLOY.md)**。重點：
 
-- **一定要 `--max-instances 1`**：回合、點數、讀到的牌都放在伺服器記憶體裡。開兩個執行個體，兩邊會各跑各的回合，觀眾看到的跟主持台不同。
-- **`--min-instances 1`**：縮到零就等於重開，所有點數與紀錄歸零。代價是會持續計費。
-- **重新部署也會歸零**。這是 prototype 的取捨，要保存就得接資料庫。
-- `--timeout 3600` 讓 WebSocket 連線最長一小時，斷了頁面會自動重連。
-- 密碼建議改放 Secret Manager：`--set-secrets STAFF_KEY=tap-duel-staff-key:latest`。
+- **一定要 `--max-instances 1`**：狀態全在記憶體，開兩個執行個體會各跑各的回合。
+- **一定要 `--concurrency 1000`**：每位觀眾都佔一條連線，預設上限只有 80。
+- `--min-instances 1` 避免縮到零而歸零，但會持續計費；重新部署也會歸零。
 
 ## 讀牌器的設定流程
 
