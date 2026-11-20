@@ -50,6 +50,7 @@
   .camera img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .camera .state { position: absolute; left: 0; right: 0; bottom: 0; padding: 4px 8px; font-size: 12px; background: rgba(0,0,0,.6); }
   .camera .state.offline { color: var(--wait); }
+  .awake { background: var(--wait); color: #1d1503; border-radius: 10px; padding: 6px 10px; font-size: 13px; font-weight: 700; }
   .totals { background: var(--surface); border-radius: 12px; padding: 8px 10px; font-size: 14px; }
   .totals .row { display: flex; justify-content: space-between; gap: 8px; }
   .notes { background: var(--surface); border-radius: 12px; padding: 8px 10px; font-size: 13px; overflow-y: auto; min-height: 0; }
@@ -105,6 +106,7 @@
     </section>
     <section class="side">
       <div class="camera"><img id="live" alt="讀牌器畫面" hidden><div class="state offline" id="readerState">讀牌器未連線（可手動選牌）</div></div>
+      <div class="awake" id="awakeState" hidden></div>
       <div class="totals" id="totals"></div>
       <div class="notes" id="notes"><p class="muted">提醒會顯示在這裡。</p></div>
     </section>

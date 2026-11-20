@@ -236,6 +236,7 @@
     if (!state.empty) warnings.push('未拍空桌');
     if (!Object.keys(state.deck).length) warnings.push('未登記牌組');
     if (state.lastSize && state.lastSize < MIN_CARD_PX) warnings.push('牌在畫面中太小');
+    if (Live.awake !== 'on') warnings.push(Live.awake === 'unsupported' ? '這個瀏覽器無法保持螢幕常亮' : '螢幕常亮未開啟，點一下畫面');
     var text = fps.toFixed(0) + ' fps' + (state.lastSize ? '・牌高 ' + state.lastSize + 'px' : '') + (warnings.length ? '・' + warnings.join('・') : '');
     $('statusText').textContent = text;
     $('sizeText').innerHTML = state.lastSize && state.lastSize < MIN_CARD_PX ? '<span class="warn">牌太小，請把手機拉近（至少 ' + MIN_CARD_PX + 'px）</span>' : '';

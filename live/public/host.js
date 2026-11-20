@@ -15,6 +15,12 @@
   var key = Live.staffKey();
   if (key) start(key); else Live.askStaffKey(start);
 
+  // Tell the host when the screen may turn off by itself.
+  Live.onAwakeChange = function (value) {
+    $('awakeState').hidden = value === 'on';
+    $('awakeState').textContent = value === 'unsupported' ? '這個瀏覽器無法保持螢幕常亮，請把自動鎖定改成「永不」。' : '螢幕常亮未開啟：點一下畫面任何地方。';
+  };
+
   function onMessage(message) {
     if (message.t === 'denied') { link.close(); Live.askStaffKey(start, true); return; }
     if (message.t === 'welcome') {

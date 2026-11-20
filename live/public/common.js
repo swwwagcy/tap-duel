@@ -141,8 +141,28 @@
     toastTimer = setTimeout(function () { box.className = 'toast'; }, 4500);
   };
 
+  // Keeps the screen on for the host and the reader. The browser drops the lock whenever the page
+  // is hidden (another app, the screen locked by hand), so it is asked for again whenever the page
+  // comes back, and on the next tap if a request was refused (some browsers want a user gesture).
+  // Live.awake: 'on', 'off' (asked but not held) or 'unsupported'. onAwakeChange is told each change.
+  Live.awake = 'off';
+  Live.onAwakeChange = null;
+  var wakeLock = null, wanted = false;
+  function setAwake(value) { if (Live.awake === value) return; Live.awake = value; if (Live.onAwakeChange) Live.onAwakeChange(value); }
+  function requestAwake() {
+    if (!wanted || wakeLock || document.visibilityState !== 'visible') return;
+    if (!('wakeLock' in navigator)) { setAwake('unsupported'); return; }
+    navigator.wakeLock.request('screen').then(function (lock) {
+      wakeLock = lock; setAwake('on');
+      lock.addEventListener('release', function () { wakeLock = null; setAwake('off'); });
+    }).catch(function () { setAwake('off'); });
+  }
   Live.keepAwake = function () {
-    try { if (navigator.wakeLock) navigator.wakeLock.request('screen').catch(function () {}); } catch (error) { /* not available */ }
+    if (wanted) { requestAwake(); return; }
+    wanted = true;
+    document.addEventListener('visibilitychange', requestAwake);
+    document.addEventListener('pointerdown', requestAwake, true);
+    requestAwake();
   };
 
   // A small tag so nobody mistakes the demo for the real thing.
