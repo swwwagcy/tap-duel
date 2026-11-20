@@ -12,6 +12,7 @@
   var MIN_CARD_PX = 240;           // recommended card height in the picture
   var HARD_MIN_CARD_PX = 150;      // below this a reading is never trusted
   var SEARCH_MARGIN = 0.08;        // the card is looked for a little beyond the drawn frame
+  var RETRY_TICKS = 10;            // a face-down or unread card is looked at again this often
   var FRAME_SEND_MS = 700;
   var WORK_MAX_WIDTH = 1920;
 
@@ -19,7 +20,8 @@
     tableId: ((/[?&]table=(\w+)/.exec(location.search) || [])[1] || Live.store.get('tdl-reader-table', 'duel')), mode: 'run',
     source: null, width: 0, height: 0, frame: null,
     zones: {}, zoneState: {}, table: null,
-    lastSize: 0, ticks: [], frameSentAt: 0, statusSentAt: 0, drag: null
+    lastSize: 0, ticks: [], frameSentAt: 0, statusSentAt: 0, drag: null,
+    zoom: Live.store.get('tdl-zoom', 1), track: null, lens: null, lastPhase: null
   };
   var work = $('work'), workContext = null, overlay = $('overlay');
   var link = null;
@@ -43,6 +45,16 @@
   function send(message) { if (link && link.online) { message.table = state.tableId; link.send(message); } }
   function setPhase(table) {
     if (table) autoDeal(table);
+    // The server only takes some states in some phases (a face-up card counts from dealing on),
+    // so when the phase changes every position says again what it currently sees.
+    if (table && table.phase !== state.lastPhase) {
+      state.lastPhase = table.phase;
+      Object.keys(state.zoneState).forEach(function (zoneId) {
+        var zs = state.zoneState[zoneId];
+        zs.reported = null;
+        if (zs.lastMessage && zs.status !== 'empty') report(zoneId, Object.assign({}, zs.lastMessage));
+      });
+    }
     $('phase').dataset.phase = table ? table.phase : 'idle';
     $('phase').textContent = table ? game().name + '・' + (table.phase === 'dealing' ? '出牌中' + (table.next ? '・下一張 ' + Games.zoneLabel(game(), table.next) : '') : Live.PHASE[table.phase]) : '未連線';
   }
@@ -74,7 +86,7 @@
   }
   function resetZoneStates() {
     state.zoneState = {};
-    game().zones.forEach(function (zone) { state.zoneState[zone.id] = { status: 'empty', still: 0, emptyCount: EMPTY_FRAMES, reads: [], prev: null, result: null, reported: 'empty' }; });
+    game().zones.forEach(function (zone) { state.zoneState[zone.id] = { status: 'empty', still: 0, wait: 0, emptyCount: EMPTY_FRAMES, reads: [], prev: null, result: null, reported: 'empty', lastMessage: null }; });
   }
   function rectOf(zoneId) {
     var z = state.zones[zoneId];
@@ -119,8 +131,9 @@
   $('startCamera').addEventListener('click', function () {
     if (window.__readerSource) { useSource(window.__readerSource, window.__readerSource.width, window.__readerSource.height); return; }
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { Live.toast('這個瀏覽器不能開相機，需要 HTTPS 網址。', 'bad'); return; }
-    navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } } }).then(function (stream) {
+    navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: 'environment' }, width: { ideal: 3840 }, height: { ideal: 2160 } } }).then(function (stream) {
       var video = $('video');
+      state.track = stream.getVideoTracks()[0] || null;
       video.srcObject = stream;
       $('startCamera').disabled = true; $('startCamera').textContent = '相機啟動中…';
       var play = video.play();
@@ -143,9 +156,9 @@
     workContext = work.getContext('2d', { willReadFrequently: true });
     $('stage').style.aspectRatio = state.width + ' / ' + state.height;
     $('hint').hidden = true;
-    $('video').hidden = source.tagName !== 'VIDEO';
     $('startCamera').textContent = '相機運行中'; $('startCamera').disabled = true;
     CardOCR.build();
+    setupZoom();
     loadTable();
     Live.keepAwake();
     tick();
@@ -157,7 +170,7 @@
     if (state.source) {
       // One bad frame (a camera hiccup, a stream that briefly stops) must not stop the loop.
       try {
-        workContext.drawImage(state.source, 0, 0, state.width, state.height);
+        drawSource();
         state.frame = workContext.getImageData(0, 0, state.width, state.height);
         process();
         drawOverlay();
@@ -170,6 +183,34 @@
       }
     }
     setTimeout(tick, Math.max(15, TICK_MS - (performance.now() - started)));
+  }
+
+  /* ---------------- zoom ---------------- */
+  // The camera's own zoom is used where the browser offers it (it keeps full detail, and can go
+  // wider than 1x on phones with a wide lens). Otherwise the middle of the picture is enlarged.
+  function setupZoom() {
+    var capabilities = null;
+    try { capabilities = state.track && state.track.getCapabilities ? state.track.getCapabilities() : null; } catch (error) { capabilities = null; }
+    state.lens = capabilities && capabilities.zoom && capabilities.zoom.max > capabilities.zoom.min ? { min: capabilities.zoom.min, max: Math.min(capabilities.zoom.max, 8) } : null;
+    $('zoomBar').hidden = false;
+    applyZoom(state.zoom);
+  }
+  function applyZoom(value) {
+    var min = state.lens ? state.lens.min : 1, max = state.lens ? state.lens.max : 4;
+    state.zoom = Math.round(Math.max(min, Math.min(max, value)) * 10) / 10;
+    Live.store.set('tdl-zoom', state.zoom);
+    $('zoomText').textContent = state.zoom.toFixed(1) + '×';
+    $('zoomOut').disabled = state.zoom <= min; $('zoomIn').disabled = state.zoom >= max;
+    if (state.lens) state.track.applyConstraints({ advanced: [{ zoom: state.zoom }] }).catch(function () { state.lens = null; applyZoom(Math.max(1, state.zoom)); });
+    resetZoneStates();
+  }
+  $('zoomIn').addEventListener('click', function () { applyZoom(state.zoom + (state.zoom < 2 ? 0.1 : 0.2)); });
+  $('zoomOut').addEventListener('click', function () { applyZoom(state.zoom - (state.zoom <= 2 ? 0.1 : 0.2)); });
+  function drawSource() {
+    var source = state.source, width = source.videoWidth || source.width, height = source.videoHeight || source.height;
+    var crop = state.lens ? 1 : Math.max(1, state.zoom);
+    var cropWidth = width / crop, cropHeight = height / crop;
+    workContext.drawImage(source, (width - cropWidth) / 2, (height - cropHeight) / 2, cropWidth, cropHeight, 0, 0, state.width, state.height);
   }
 
   function process() {
@@ -189,7 +230,11 @@
       if (covered < defaults.presence) { zs.why = '變化太小，看不出有牌'; return; }
       if (moved > defaults.stillness) { zs.why = '畫面在動，等牌放穩'; zs.still = 0; zs.reads = []; zs.attempts = 0; zs.status = 'busy'; return; }
       zs.still++;
-      if (zs.status !== 'busy' && zs.status !== 'empty') return;      // this placement was already read
+      if (zs.status === 'back' || zs.status === 'unsure') {
+        // Face down or not read yet: look again every so often (a flip also shows up as movement).
+        if (++zs.wait < RETRY_TICKS) return;
+        zs.wait = 0; zs.attempts = READ_ATTEMPTS - 1; zs.reads = []; zs.again = true;
+      } else if (zs.status !== 'busy' && zs.status !== 'empty') return;      // this placement was already read
       if (zs.still < STILL_FRAMES || state.mode !== 'run') return;
       var found = R.locate(frame, { colour: table }, rect);
       if (!found) {
@@ -213,14 +258,16 @@
     var cards = Object.keys(votes);
     var best = reads.filter(function (reading) { return reading.card; }).sort(function (a, b) { return b.score - a.score; })[0] || null;
     if (cards.length === 1 && votes[cards[0]] >= 2) lead = reads.filter(function (reading) { return reading.sure; })[0];
-    return { sure: !!lead, reading: lead || best };
+    var backs = reads.filter(function (reading) { return reading.back; }).length;
+    return { sure: !!lead, back: !lead && !cards.length && backs * 2 > reads.length, reading: lead || best };
   }
   var PROBLEMS = { 'no index found': '找不到牌角的點數', 'no suit under the rank': '點數下方找不到花色', 'suit size does not fit the rank': '花色大小不合理', 'only one corner readable': '只有一個牌角讀得到', 'corners disagree': '兩個牌角讀到的不一樣', 'card too small': '牌在畫面中太小' };
 
   function finish(zoneId, zs, rect) {
     var reads = zs.reads; zs.reads = [];
     var verdict = decide(reads), reading = verdict.reading;
-    zs.result = reading;
+    zs.result = reading; zs.wait = 0;
+    if (verdict.back) { zs.status = 'back'; zs.why = ''; zs.again = false; report(zoneId, { state: 'back' }); return; }
     zs.attempts = (zs.attempts || 0) + 1;
     if (!verdict.sure && zs.attempts < READ_ATTEMPTS) { zs.status = 'busy'; zs.still = 0; return; }   // read again with fresh frames
     zs.status = verdict.sure ? 'card' : 'unsure';
@@ -237,7 +284,8 @@
     var zs = state.zoneState[zoneId];
     var signature = message.state + ':' + (message.card || '');
     if (state.mode !== 'run') return;
-    if (signature === zs.reported && message.state !== 'unsure') return;
+    zs.lastMessage = message;
+    if (signature === zs.reported) return;
     zs.reported = signature;
     message.t = 'zone'; message.zone = zoneId;
     send(message);
@@ -302,7 +350,7 @@
     $('readouts').innerHTML = game().zones.map(function (zone) {
       var zs = state.zoneState[zone.id] || {};
       var card = zs.status === 'card' && zs.result ? zs.result.card : null;
-      var text = zs.status === 'card' ? '讀到 ' + Math.round(zs.result.score * 100) + '%' : zs.status === 'unsure' ? '認不出來' : zs.status === 'busy' ? '偵測中' : '空';
+      var text = zs.status === 'card' ? '讀到 ' + Math.round(zs.result.score * 100) + '%' : zs.status === 'back' ? '牌背（未翻開）' : zs.status === 'unsure' ? '認不出來' : zs.status === 'busy' ? '偵測中' : '空';
       var numbers = [];
       if (zs.coverage != null) numbers.push('覆蓋 ' + Math.round(zs.coverage * 100) + '%');
       if (zs.moving != null && zs.moving < 90) numbers.push('晃動 ' + zs.moving.toFixed(0));
@@ -320,19 +368,19 @@
     if (overlay.width !== width || overlay.height !== height) { overlay.width = width; overlay.height = height; }
     var context = overlay.getContext('2d');
     context.clearRect(0, 0, width, height);
-    if (state.source && state.source.tagName !== 'VIDEO') context.drawImage(work, 0, 0, width, height);
+    if (state.source) context.drawImage(work, 0, 0, width, height);   // what is read is what is shown, zoom included
     var next = state.table && state.table.phase === 'dealing' ? state.table.next : null;
     game().zones.forEach(function (zone) {
       var z = state.zones[zone.id], zs = state.zoneState[zone.id] || {};
       var x = z[0] * width, y = z[1] * height, w = z[2] * width, h = z[3] * height;
-      var colour = zs.status === 'card' || zs.status === 'done' ? '#37c58a' : zs.status === 'unsure' ? '#e9584c' : zs.status === 'busy' ? '#f2b23e' : 'rgba(255,255,255,0.7)';
+      var colour = zs.status === 'card' ? '#37c58a' : zs.status === 'back' ? '#4f8ff7' : zs.status === 'unsure' ? '#e9584c' : zs.status === 'busy' ? '#f2b23e' : 'rgba(255,255,255,0.7)';
       context.lineWidth = (next === zone.id ? 6 : 3) * ratio;
       context.strokeStyle = next === zone.id ? '#f2b23e' : colour;
       context.setLineDash(zs.status === 'empty' && next !== zone.id ? [8 * ratio, 6 * ratio] : []);
       context.strokeRect(x, y, w, h);
       context.setLineDash([]);
       context.font = 'bold ' + Math.round(14 * ratio) + 'px sans-serif';
-      var label = zone.label + (zs.status === 'card' && zs.result ? ' ' + Games.cardLabel(zs.result.card) : zs.status === 'unsure' ? ' ?' : '');
+      var label = zone.label + (zs.status === 'card' && zs.result ? ' ' + Games.cardLabel(zs.result.card) : zs.status === 'unsure' ? ' ?' : zs.status === 'back' ? ' 牌背' : '');
       context.fillStyle = 'rgba(0,0,0,0.6)'; context.fillRect(x, y, context.measureText(label).width + 10 * ratio, 20 * ratio);
       context.fillStyle = colour; context.fillText(label, x + 5 * ratio, y + 15 * ratio);
       if (state.mode === 'zones') { context.fillStyle = '#f2b23e'; context.fillRect(x + w - 18 * ratio, y + h - 18 * ratio, 18 * ratio, 18 * ratio); }

@@ -250,8 +250,38 @@
     return { rank: rankRead, suit: suitRead, card: suitRead.key + rankRead.key, boxes: { rank: rank, suit: suit } };
   }
 
+  // Share of the card's inside that is printed. A face shows mostly paper; a back is a pattern
+  // from edge to edge.
+  function printedShare(frame, card) {
+    var cos = Math.cos(card.angle), sin = Math.sin(card.angle), pixel = [0, 0, 0], samples = [], brightest = 0;
+    for (var j = 0; j < 40; j++) for (var i = 0; i < 28; i++) {
+      var lx = ((i + 0.5) / 28 - 0.5) * card.w * 0.8, ly = ((j + 0.5) / 40 - 0.5) * card.h * 0.84;
+      rgbAt(frame, card.cx + lx * cos - ly * sin, card.cy + lx * sin + ly * cos, pixel);
+      var luma = 0.299 * pixel[0] + 0.587 * pixel[1] + 0.114 * pixel[2];
+      samples.push([pixel[0], pixel[1], pixel[2], luma]);
+      if (luma > brightest) brightest = luma;
+    }
+    var paper = [0, 0, 0], count = 0;
+    samples.forEach(function (sample) { if (sample[3] >= brightest * 0.9) { paper[0] += sample[0]; paper[1] += sample[1]; paper[2] += sample[2]; count++; } });
+    paper = paper.map(function (value) { return value / count; });
+    var printed = 0;
+    samples.forEach(function (sample) { if (Math.abs(sample[0] - paper[0]) + Math.abs(sample[1] - paper[1]) + Math.abs(sample[2] - paper[2]) > 70) printed++; });
+    return printed / samples.length;
+  }
+
   // Reads both corner indexes. sure: both corners give the same card, each clearly.
+  // back: no index in either corner, or a card printed all over that could not be read: it is
+  // lying face down (or cannot be seen at all), which is a state of its own, not a failed reading.
   function read(frame, card, limits) {
+    var result = readFace(frame, card, limits);
+    if (!result.sure) {
+      var share = printedShare(frame, card);
+      result.printed = share;
+      result.back = (!result.card && share > 0.2) || share > 0.55;
+    }
+    return result;
+  }
+  function readFace(frame, card, limits) {
     limits = limits || LIMITS;
     var corners = [readCorner(frame, card, false), readCorner(frame, card, true)];
     var good = corners.filter(function (corner) { return !corner.problem; });

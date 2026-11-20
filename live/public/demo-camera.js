@@ -63,6 +63,21 @@
     }
   }
 
+  // The back of a card: a white rim round a dense diamond pattern.
+  function drawBack(ctx, cw, ch) {
+    ctx.fillStyle = '#f7f7f2'; ctx.fillRect(-cw / 2, -ch / 2, cw, ch);
+    ctx.save();
+    ctx.beginPath(); ctx.rect(-cw * 0.44, -ch * 0.46, cw * 0.88, ch * 0.92); ctx.clip();
+    ctx.fillStyle = '#1d3f8f'; ctx.fillRect(-cw / 2, -ch / 2, cw, ch);
+    ctx.strokeStyle = '#f7f7f2'; ctx.lineWidth = Math.max(1, cw * 0.012);
+    var step = cw * 0.09;
+    for (var offset = -ch; offset < ch; offset += step) {
+      ctx.beginPath(); ctx.moveTo(-cw / 2, offset); ctx.lineTo(cw / 2, offset + cw); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(-cw / 2, offset + cw); ctx.lineTo(cw / 2, offset); ctx.stroke();
+    }
+    ctx.restore();
+  }
+
   // A canvas of any size with cards on it; place() swaps the cards, refresh adds new noise.
   function source(width, height, options) {
     options = options || {};
@@ -80,7 +95,8 @@
       placed.forEach(function (p) {
         context.save(); context.translate(p.x, p.y); context.rotate((p.angle || 0) + (p.flip ? Math.PI : 0));
         context.shadowColor = 'rgba(0,0,0,0.35)'; context.shadowBlur = 4; context.shadowOffsetY = 2;
-        drawCard(context, p.card, p.h * 0.716, p.h, options.palette, options.font);
+        if (p.back) drawBack(context, p.h * 0.716, p.h);
+        else drawCard(context, p.card, p.h * 0.716, p.h, options.palette, options.font);
         context.restore();
       });
       var image = context.getImageData(0, 0, width, height);
@@ -99,5 +115,5 @@
     };
   }
 
-  root.DemoCamera = { drawCard: drawCard, source: source };
+  root.DemoCamera = { drawCard: drawCard, drawBack: drawBack, source: source };
 })(typeof self !== 'undefined' ? self : this);

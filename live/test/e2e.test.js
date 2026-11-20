@@ -116,6 +116,22 @@ const card = (socket, table, zone, value) => socket.send(JSON.stringify({ t: 'zo
   await host.click('#voidButton'); await host.click('#voidButton');
   await until(async () => (await points()) === 10900, 'cancel returns the 500');
   step('manual correction wins over the camera; cancelling returns every point');
+  /* Face-down cards: placed during the countdown, shown as backs, read once turned over. */
+  await until(() => host.evaluate(() => !document.getElementById('mainButton').disabled), 'can start the face-down round');
+  await host.click('#mainButton');
+  await until(() => host.evaluate(() => document.getElementById('phaseBox').dataset.phase === 'open'), 'face-down round open');
+  const notesBefore = await host.evaluate(() => document.querySelectorAll('#notes .warn').length);
+  reader.send(JSON.stringify({ t: 'zone', table: 'nine', zone: 'U1', state: 'back' }));
+  await until(() => host.evaluate(() => document.querySelector('.zone[data-zone="U1"]').classList.contains('back')), 'host shows the face-down card');
+  await until(() => viewer.evaluate(() => !!document.querySelector('[data-zone="U1"] .cardface.back')), 'viewer shows the face-down card');
+  assert.strictEqual(await host.evaluate(() => document.querySelectorAll('#notes .warn').length), notesBefore, 'a face-down card before dealing is not a warning');
+  await until(() => host.evaluate(() => document.getElementById('phaseBox').dataset.phase === 'dealing'), 'face-down round dealing', 12000);
+  assert.strictEqual(await host.evaluate(() => document.getElementById('guide').textContent.includes('藍方 1')), true, 'a face-down card does not count as dealt');
+  card(reader, 'nine', 'U1', 'SQ');
+  await until(() => host.evaluate(() => document.querySelector('.zone[data-zone="U1"]').textContent.includes('Q')), 'turned-over card is read');
+  await host.click('#voidButton'); await host.click('#voidButton');
+  await until(() => host.evaluate(() => document.getElementById('phaseBox').dataset.phase === 'void'), 'face-down round cancelled');
+  step('face-down card: shown as a back to host and viewer with no warning, read after it is turned over');
   reader.close();
 
   /* The real camera path: start the (fake) webcam; frames must flow with no further setup. */
@@ -147,6 +163,15 @@ const card = (socket, table, zone, value) => socket.send(JSON.stringify({ t: 'zo
   await host.click('#mainButton');
   await until(() => viewer.evaluate(() => !document.querySelector('.spot[data-spot="U"]').disabled), 'round 4 open');
   await viewer.click('.chip[data-chip="100"]'); await viewer.click('.spot[data-spot="U"]');
+  // The cards go down face-down first during the countdown; the reader must report them as backs.
+  await readerPage.evaluate(([r, b]) => window.__fake.place([{ back: true, h: 420, x: r.x, y: r.y, angle: 0.03 }, { back: true, h: 420, x: b.x, y: b.y, angle: -0.04 }]), [{ x: (0.14 + 0.15) * 1920, y: 0.5 * 1080 }, { x: (0.56 + 0.15) * 1920, y: 0.5 * 1080 }]);
+  await until(() => host.evaluate(() => document.querySelectorAll('.zone.back').length === 2), 'reader page reports both face-down cards', 15000);
+  // Zoom: the buttons change the picture the reader works on.
+  const zoomBefore = await readerPage.textContent('#zoomText');
+  await readerPage.click('#zoomIn'); await readerPage.click('#zoomIn');
+  assert.notStrictEqual(await readerPage.textContent('#zoomText'), zoomBefore, 'zoom changes');
+  await readerPage.click('#zoomOut'); await readerPage.click('#zoomOut');
+  assert.strictEqual(await readerPage.textContent('#zoomText'), zoomBefore, 'zoom returns');
   await until(() => host.evaluate(() => document.getElementById('phaseBox').dataset.phase === 'dealing'), 'round 4 dealing', 12000);
   const red = { x: (0.14 + 0.15) * 1920, y: (0.22 + 0.28) * 1080 }, blue = { x: (0.56 + 0.15) * 1920, y: (0.22 + 0.28) * 1080 };
   await readerPage.evaluate(([r, b]) => window.__fake.place([{ card: 'S9', h: 420, x: r.x + 12, y: r.y - 8, angle: 0.06 }, { card: 'H3', h: 420, x: b.x - 10, y: b.y + 6, angle: -0.05, flip: true }]), [red, blue]);
@@ -155,7 +180,8 @@ const card = (socket, table, zone, value) => socket.send(JSON.stringify({ t: 'zo
   const truth = { R: 'S9', U: 'H3' };
   const readZones = () => host.evaluate(() => ['R', 'U'].map(zone => {
     const tile = document.querySelector('.zone[data-zone="' + zone + '"]');
-    return { zone, text: tile.textContent, unsure: tile.classList.contains('unsure'), filled: !tile.querySelector('.cardface').classList.contains('empty') };
+    const face = tile.querySelector('.cardface');
+    return { zone, text: tile.textContent, unsure: tile.classList.contains('unsure'), filled: !face.classList.contains('empty') && !face.classList.contains('back') };
   }));
   const zones = await until(async () => { const list = await readZones(); return list.every(item => item.filled || item.unsure) ? list : null; }, 'both zones read or flagged', 20000);
   let optical = 0;

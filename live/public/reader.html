@@ -18,6 +18,9 @@
   .stage .hint { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--muted); padding: 16px; text-align: center; }
   #overlay { touch-action: none; }
   .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .zoom { display: inline-flex; align-items: center; gap: 6px; }
+  .zoom button { min-width: 48px; font-size: 20px; font-weight: 700; }
+  .zoom .num { min-width: 52px; text-align: center; font-weight: 700; }
   .readouts { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; align-content: start; }
   #panelRun { flex-wrap: nowrap; }
   .readout { background: var(--surface); border-radius: 10px; padding: 8px; display: flex; gap: 8px; align-items: center; font-size: 14px; }
@@ -55,6 +58,11 @@
   <section class="controls" id="cameraBar">
     <button class="primary" id="startCamera" type="button">開始相機</button>
     <button id="fakeCamera" type="button" hidden>使用模擬攝影機</button>
+    <span class="zoom" id="zoomBar" hidden>
+      <button id="zoomOut" type="button" aria-label="縮小">－</button>
+      <span class="num" id="zoomText">1.0×</span>
+      <button id="zoomIn" type="button" aria-label="放大">＋</button>
+    </span>
     <label id="autoDealLabel" hidden style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="autoDeal" checked style="width:22px;height:22px;min-height:0">自動出牌（模擬）</label>
   </section>
 
@@ -65,7 +73,7 @@
   </section>
 
   <section id="panelZones" class="controls" hidden>
-    <p class="note" style="flex-basis:100%">拖曳框框移動位置，拖右下角的方塊調整大小。框要比牌大一圈，四邊都要看得到桌面，牌放歪也還在框內。</p>
+    <p class="note" style="flex-basis:100%">用上方的 －／＋ 縮放畫面，讓牌位佔滿畫面。拖曳框框移動位置，拖右下角的方塊調整大小。框要比牌大一圈，四邊都要看得到桌面，牌放歪也還在框內。</p>
     <button id="resetZones" type="button">恢復預設位置</button>
   </section>
 

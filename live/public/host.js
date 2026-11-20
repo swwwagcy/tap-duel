@@ -36,6 +36,7 @@
     } else if (message.t === 'frame') {
       if (message.table !== state.tableId) return;
       $('live').src = message.image; $('live').hidden = false;
+      if ($('live').naturalWidth) document.querySelector('.camera').style.aspectRatio = String(Math.max(0.9, Math.min(1.9, $('live').naturalWidth / $('live').naturalHeight)));
     } else if (message.t === 'notice') {
       if (message.table === state.tableId) note(message.text, message.level);
     } else if (message.t === 'error') {
@@ -84,17 +85,18 @@
     $('roundNo').textContent = table.roundNo || '—';
     $('phaseBox').dataset.phase = phase;
     $('phaseText').textContent = phase === 'result' && table.outcome ? table.outcome.text : phase === 'dealing' ? '可以出牌' : (Live.PHASE[phase] || phase);
-    $('phaseSub').textContent = phase === 'closed' ? '還不要翻牌，等畫面變綠' : phase === 'open' ? '觀眾選擇中，桌上不要有牌' : '';
+    $('phaseSub').textContent = phase === 'closed' ? '還不要翻牌，等畫面變綠' : phase === 'open' ? '觀眾選擇中，牌先不要翻開' : '';
 
     var required = phase === 'dealing' ? current.required(cardsOf(table)) : current.zones.map(function (zone) { return zone.id; });
     current.zones.forEach(function (zone) {
       var button = document.querySelector('.zone[data-zone="' + zone.id + '"]');
       if (!button) return;
       var entry = table.cards[zone.id];
-      button.querySelector('.face').innerHTML = Live.cardHtml(entry && entry.card);
+      button.querySelector('.face').innerHTML = Live.cardHtml(entry && entry.back ? 'back' : entry && entry.card);
       var tag = '';
       if (entry) {
-        if (entry.uncertain) tag = '認不出來，請點選';
+        if (entry.back) tag = '牌背，等翻開';
+        else if (entry.uncertain) tag = '認不出來，請點選';
         else if (entry.source === 'manual') tag = '手動';
         else tag = '光學 ' + Math.round((entry.score || 0) * 100) + '%';
         if (entry.conflict) tag = '重複的牌';
@@ -104,6 +106,7 @@
       if (entry && entry.shot) { shot.src = entry.shot; shot.hidden = false; } else shot.hidden = true;
       button.classList.toggle('next', table.next === zone.id);
       button.classList.toggle('unsure', !!(entry && (entry.uncertain || entry.conflict)));
+      button.classList.toggle('back', !!(entry && entry.back));
       button.classList.toggle('manual', !!(entry && entry.source === 'manual'));
       button.classList.toggle('off', phase === 'dealing' && required.indexOf(zone.id) < 0 && !entry);
       button.disabled = phase !== 'dealing';
@@ -138,7 +141,7 @@
     var table = state.table, guide = $('guide'), current = game();
     guide.classList.remove('bad');
     if (table.phase !== 'dealing') {
-      guide.textContent = table.phase === 'idle' ? '按「開始新回合」開放觀眾選擇。' : table.phase === 'open' ? '倒數中，桌上保持清空。' : table.phase === 'closed' ? '已截止，等待直播延遲過去。' : table.phase === 'result' ? '已結算。清桌後可開下一回合。' : '本回合已取消，點數已退回。';
+      guide.textContent = table.phase === 'idle' ? '按「開始新回合」開放觀眾選擇。' : table.phase === 'open' ? '倒數中。可以先把牌背面朝上放好，先不要翻開。' : table.phase === 'closed' ? '已截止，等待直播延遲過去。' : table.phase === 'result' ? '已結算。清桌後可開下一回合。' : '本回合已取消，點數已退回。';
       return;
     }
     var check = table.check;

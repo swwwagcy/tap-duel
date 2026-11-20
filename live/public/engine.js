@@ -88,8 +88,8 @@
         Object.keys(round.cards).forEach(function (zone) {
           const entry = round.cards[zone];
           cards[zone] = role === 'viewer'
-            ? { card: entry.card, source: entry.source }
-            : { card: entry.card, source: entry.source, score: entry.score, margin: entry.margin, top: entry.top, shot: entry.shot, uncertain: entry.uncertain, conflict: entry.conflict };
+            ? { card: entry.card, source: entry.source, back: entry.back }
+            : { card: entry.card, source: entry.source, back: entry.back, score: entry.score, margin: entry.margin, top: entry.top, shot: entry.shot, uncertain: entry.uncertain, conflict: entry.conflict };
         });
       }
       const view = {
@@ -374,22 +374,33 @@
       const label = Games.zoneLabel(table.game, zone);
       if (!table.game.zones.some(function (item) { return item.id === zone; })) return 'Unknown zone.';
       if (!round) return null;
+      const existing = round.cards[zone];
+      // Before dealing, cards may already lie face down. A face-down card is shown as such; a card
+      // that can be read this early was turned over too soon, and its value is not recorded.
       if (table.phase === 'open' || table.phase === 'closed') {
-        if (message.state !== 'empty' && !round.warned['early-' + zone]) {
+        if (message.state === 'back') {
+          if (!existing) { round.cards[zone] = { card: null, source: 'optical', back: true, at: Date.now() }; broadcastTable(table); }
+        } else if (message.state === 'empty') {
+          if (existing) { delete round.cards[zone]; broadcastTable(table); }
+        } else if (!round.warned['early-' + zone]) {
           round.warned['early-' + zone] = true;
-          notifyStaff(table, 'warn', label + ' 在截止前就有牌，請確認沒有提早翻牌。');
+          notifyStaff(table, 'warn', label + ' 在截止前就翻開了，請確認。');
         }
         return null;
       }
       if (table.phase !== 'dealing') return null;
-      const existing = round.cards[zone];
       if (message.state === 'empty') {
         if (existing && existing.source === 'optical') { delete round.cards[zone]; markConflicts(round); broadcastTable(table); }
         return null;
       }
       if (existing && existing.source === 'manual') return null;   // the host's own choice wins over the camera
+      if (message.state === 'back') {
+        if (!existing || !existing.back) { round.cards[zone] = { card: null, source: 'optical', back: true, at: Date.now() }; markConflicts(round); broadcastTable(table); }
+        return null;
+      }
+      if (existing && existing.back) delete round.cards[zone];      // it has been turned over
       const required = table.game.required(cardMap(round));
-      if (!existing && required.indexOf(zone) < 0) {
+      if ((!existing || existing.back) && required.indexOf(zone) < 0) {
         if (!round.warned['extra-' + zone]) { round.warned['extra-' + zone] = true; notifyStaff(table, 'warn', label + ' 現在不該出牌，這張沒有採用。'); }
         return null;
       }

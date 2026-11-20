@@ -23,6 +23,7 @@
   Live.secondsLeft = function (endsAt) { return endsAt ? Math.max(0, Math.ceil((endsAt - Live.now()) / 1000)) : 0; };
 
   Live.cardHtml = function (card, extraClass) {
+    if (card === 'back') return '<span class="cardface back ' + (extraClass || '') + '"></span>';
     if (!card) return '<span class="cardface empty ' + (extraClass || '') + '"></span>';
     var red = Games.isRed(card);
     return '<span class="cardface ' + (red ? 'red ' : '') + (extraClass || '') + '"><b>' + Live.escape(Games.rankOf(card)) + '</b><i>' + Games.SUIT_SYMBOL[Games.suitOf(card)] + '</i></span>';

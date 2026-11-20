@@ -35,6 +35,7 @@
     } else if (message.t === 'frame') {
       if (message.table !== state.tableId) return;
       $('live').src = message.image; $('live').hidden = false; $('noFrame').hidden = true; state.frameAt = Date.now();
+      fitStage();
     } else if (message.t === 'result') {
       if (message.table === state.tableId) { state.lastResult = message; renderBanner(); }
     } else if (message.t === 'error') {
@@ -124,7 +125,7 @@
     current.zones.forEach(function (zone) {
       var slot = document.querySelector('[data-zone="' + zone.id + '"]');
       var entry = table.cards[zone.id];
-      if (slot) slot.innerHTML = Live.cardHtml(entry && entry.card);
+      if (slot) slot.innerHTML = Live.cardHtml(entry && entry.back ? 'back' : entry && entry.card);
     });
     var outcome = table.outcome;
     document.querySelectorAll('.hand').forEach(function (hand) {
@@ -144,6 +145,16 @@
     renderBanner();
     renderMe();
     tick();
+  }
+
+  // The table picture keeps the reader's own shape (a phone held upright gives a tall picture)
+  // and is always shown whole.
+  $('live').addEventListener('load', fitStage);
+  function fitStage() {
+    var image = $('live');
+    if (!image.naturalWidth) return;
+    var ratio = image.naturalWidth / image.naturalHeight;
+    document.querySelector('.stage').style.aspectRatio = String(Math.max(0.8, Math.min(1.9, ratio)));
   }
 
   function spotWon(spot) {
