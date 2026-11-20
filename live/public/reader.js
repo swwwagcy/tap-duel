@@ -40,7 +40,7 @@
 
   function send(message) { if (link && link.online) { message.table = state.tableId; link.send(message); } }
   function setPhase(table) {
-    if (table) { autoDeal(table); learn(table); }
+    if (table) autoDeal(table);
     $('phase').dataset.phase = table ? table.phase : 'idle';
     $('phase').textContent = table ? game().name + '・' + (table.phase === 'dealing' ? '出牌中' + (table.next ? '・下一張 ' + Games.zoneLabel(game(), table.next) : '') : Live.PHASE[table.phase]) : '未連線';
   }
@@ -194,8 +194,7 @@
         return;
       }
       state.lastSize = Math.round(found.h); zs.height = Math.round(found.h); zs.lightTable = !!found.lightTable;
-      if (state.mode === 'deck') zs.samples.push(R.describeRaw(frame, found));
-      else { zs.samples.push(R.describeProbe(frame, found)); zs.raws = (zs.raws || []).concat([R.describeRaw(frame, found)]).slice(-READ_FRAMES); }
+      zs.samples.push(state.mode === 'deck' ? R.describeRaw(frame, found) : R.describeProbe(frame, found));
       if (zs.samples.length >= READ_FRAMES) finish(zone.id, zs, rect, found);
     });
   }
@@ -205,8 +204,6 @@
     if (state.mode === 'deck') { register(zs, samples, found); return; }
     if (state.mode !== 'run') { zs.status = 'unsure'; return; }
     var shot = cropShot(rect);
-    // What this reading saw, kept so the host's answer can teach the reader this card (see learn()).
-    zs.learnRaw = found && zs.raws && zs.raws.length ? R.averageRaw(zs.raws) : null;
     var model = getModel();
     if (!found || !model) {
       zs.status = 'unsure'; zs.result = null;
@@ -214,9 +211,9 @@
       return;
     }
     var result = R.match(R.averageProbe(samples), model);
-    // With part of the deck learned, the best match can only be a card already seen; a card not
-    // learned yet would be forced onto its nearest neighbour. Until the deck covers every rank and
-    // suit, a reading is only a suggestion for the host.
+    // With only part of the deck registered, the best match can only be a registered card; one that
+    // was not registered would be forced onto its nearest neighbour. Until the registered cards
+    // cover every rank and suit, a reading is only a suggestion for the host.
     if (!deckCovered()) { result.sure = false; result.partial = true; }
     zs.result = result;
     zs.attempts = (zs.attempts || 0) + 1;
@@ -259,7 +256,7 @@
     var fps = state.ticks.length / 2;
     var warnings = [];
     if (!state.empty) warnings.push('未拍空桌');
-    if (!deckCovered()) warnings.push('學習中 ' + Object.keys(state.deck).length + '/52');
+    if (!deckCovered()) warnings.push(Object.keys(state.deck).length ? '牌組 ' + Object.keys(state.deck).length + '/52' : '未登記牌組（手選）');
     if (state.lastSize && state.lastSize < MIN_CARD_PX) warnings.push('牌在畫面中太小');
     if (Live.awake !== 'on') warnings.push(Live.awake === 'unsupported' ? '這個瀏覽器無法保持螢幕常亮' : '螢幕常亮未開啟，點一下畫面');
     var text = fps.toFixed(0) + ' fps' + (state.lastSize ? '・牌高 ' + state.lastSize + 'px' : '') + (warnings.length ? '・' + warnings.join('・') : '');
@@ -272,9 +269,9 @@
 
   /* ---------------- reference images of the deck ---------------- */
 
-  // Enough of the deck to read on its own: every rank seen in at least two suits and every suit
-  // seen in at least six ranks. Rank and suit are judged separately, so a card can be read before
-  // that exact card has been learned, as long as its rank and its suit have been.
+  // Enough of the deck registered to read on its own: every rank in at least two suits and every
+  // suit in at least six ranks. Rank and suit are judged separately, so a card can be read without
+  // that exact card registered, as long as its rank and its suit are.
   function deckCovered() {
     var suitsPerRank = {}, ranksPerSuit = {};
     Object.keys(state.deck).forEach(function (card) {
@@ -284,28 +281,6 @@
     return Games.RANKS.every(function (rank) { return (suitsPerRank[rank] || 0) >= 2; }) && Games.SUITS.every(function (suit) { return (ranksPerSuit[suit] || 0) >= 6; });
   }
 
-  // Learning by playing: when a round is confirmed, every card the host chose by hand becomes a
-  // reference image (or improves one), using what the camera saw at that position.
-  state.learnedRounds = {};
-  function learn(table) {
-    if (table.phase !== 'result' || !table.roundNo || state.learnedRounds[table.roundNo] || state.mode !== 'run') return;
-    state.learnedRounds[table.roundNo] = true;
-    var learned = [];
-    Object.keys(table.cards || {}).forEach(function (zoneId) {
-      var entry = table.cards[zoneId], zs = state.zoneState[zoneId];
-      if (!entry || entry.source !== 'manual' || !entry.card || !zs || !zs.learnRaw) return;
-      var existing = state.deck[entry.card];
-      var raw = existing ? R.averageRaw([R.decodeRaw(existing), zs.learnRaw]) : zs.learnRaw;
-      state.deck[entry.card] = R.encodeRaw(raw);
-      zs.learnRaw = null;
-      learned.push(Games.cardLabel(entry.card));
-    });
-    if (!learned.length) return;
-    state.model = null;
-    Live.store.set('tdl-deck', state.deck);
-    renderDeck();
-    Live.toast('已記住 ' + learned.join('、') + '（' + Object.keys(state.deck).length + ' / 52）', 'good');
-  }
   function getModel() {
     if (state.model) return state.model;
     var entries = Object.keys(state.deck).map(function (card) { return { card: card, raw: R.decodeRaw(state.deck[card]) }; });
@@ -384,8 +359,8 @@
     var stop = blocker();
     $('blocker').hidden = !stop; $('blocker').textContent = stop;
     var count = Object.keys(state.deck).length;
-    $('learning').hidden = !!stop || deckCovered();
-    $('learning').textContent = '學習中：已記住 ' + count + ' / 52 張。認不出來的牌請主持台手選，確認結果後會自動記住；每個點數學過兩種花色、每種花色學過六個點數後就會自動讀牌。也可以到「登記牌組」一次登記完。';
+    $('deckNote').hidden = !!stop || deckCovered();
+    $('deckNote').textContent = count ? '牌組只登記了 ' + count + ' / 52 張，讀到的牌只當建議，由主持台確認。登記完整後會自動讀牌。' : '沒有登記牌組：每張牌都由主持台手選。到「登記牌組」登記 52 張後，就會自動讀牌。';
     $('readouts').innerHTML = game().zones.map(function (zone) {
       var zs = state.zoneState[zone.id] || {};
       var card = zs.status === 'card' && zs.result ? zs.result.card : null;

@@ -25,7 +25,7 @@
   .readout .label { font-weight: 700; }
   .readout .diag { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
   .readout .why { font-size: 12px; color: var(--wait); }
-  .learning { background: var(--surface); border: 2px solid var(--line); border-radius: 10px; padding: 8px 12px; font-size: 14px; color: var(--muted); }
+  .decknote { background: var(--surface); border: 2px solid var(--line); border-radius: 10px; padding: 8px 12px; font-size: 14px; color: var(--muted); }
   .blocker { background: var(--wait); color: #1d1503; border-radius: 10px; padding: 8px 12px; font-weight: 700; }
   .readout.red .label { color: var(--red); } .readout.blue .label { color: var(--blue); }
   .prompt { font-size: 22px; font-weight: 700; }
@@ -71,9 +71,9 @@
 
   <section id="panelRun" class="controls" style="flex-direction:column;align-items:stretch">
     <div class="blocker" id="blocker" hidden></div>
-    <div class="learning" id="learning" hidden></div>
+    <div class="decknote" id="deckNote" hidden></div>
     <div class="readouts" id="readouts"></div>
-    <p class="note">流程：調整牌位 → 清空桌面按「拍空桌」 → 運行。登記牌組是選用的：不登記也能開始，認不出來的牌由主持台手選，系統會自動記住。相機或燈光移動過，要重新拍空桌。桌面要比牌暗。</p>
+    <p class="note">流程：調整牌位 → 清空桌面按「拍空桌」 → 運行。登記牌組是選用的：不登記也能開始，每張牌由主持台手選；登記後才會自動讀牌。相機或燈光移動過，要重新拍空桌。桌面要比牌暗。</p>
   </section>
 
   <section id="panelZones" class="controls" hidden>
@@ -91,7 +91,7 @@
       <span id="deckCount" class="muted"></span>
     </div>
     <div class="deck" id="deckGrid"></div>
-    <p class="note">選用：一次登記完，從第一回合就能自動讀牌。不登記也可以，運行時會邊玩邊學。把提示的牌正面朝上放進任何一個牌位，放穩後會自動拍下，拿開之後換下一張。同一副牌換到另一款遊戲也能用，不用重新登記。</p>
+    <p class="note">選用：登記完 52 張就能自動讀牌；不登記也能運行，每張牌由主持台手選。把提示的牌正面朝上放進任何一個牌位，放穩後會自動拍下，拿開之後換下一張。同一副牌換到另一款遊戲也能用，不用重新登記。</p>
   </section>
 </div>
 <div id="toast" class="toast" role="status"></div>
