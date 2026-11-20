@@ -136,6 +136,53 @@ const card = (socket, table, zone, value) => socket.send(JSON.stringify({ t: 'zo
   await cameraContext.close();
   step('real camera path: webcam starts, empty table taken while adjusting positions, deck mode ready');
 
+  /* Learning by playing: a reader with no deck at all; the host picks, confirms, the reader learns. */
+  const learnerContext = await browser.newContext({ viewport: { width: 1100, height: 900 } });
+  const learner = await learnerContext.newPage();
+  learner.on('pageerror', error => errors.push(error.message));
+  await learner.goto(BASE + '/reader.html#key=' + KEY);
+  await learner.evaluate(() => { window.__fake = DemoCamera.source(1280, 720); window.__readerSource = window.__fake.canvas; });
+  await until(() => learner.evaluate(() => document.querySelectorAll('#tableTabs button').length === 2), 'learner tabs');
+  await learner.click('#tableTabs button[data-table="duel"]');
+  await learner.click('#startCamera');
+  await wait(500);
+  await learner.click('#captureEmpty');
+  assert.strictEqual(await learner.evaluate(() => Object.keys(window.__readerState.deck).length), 0, 'learner starts with no deck');
+  await host.click('#tableTabs button[data-table="duel"]');
+  await until(() => host.evaluate(() => document.querySelectorAll('.zone').length === 2 && !document.getElementById('mainButton').disabled), 'host on duel');
+  await host.click('#mainButton');
+  await until(() => host.evaluate(() => document.getElementById('phaseBox').dataset.phase === 'dealing'), 'learning round dealing', 15000);
+  const centre = zone => ({ x: (zone === 'R' ? 0.29 : 0.71) * 1280, y: 0.5 * 720 });
+  await learner.evaluate(([r, u]) => window.__fake.place([{ card: 'S9', h: 230, x: r.x, y: r.y }, { card: 'H3', h: 230, x: u.x, y: u.y }]), [centre('R'), centre('U')]);
+  await until(() => host.evaluate(() => document.querySelectorAll('.zone.unsure').length === 2), 'both flagged for the host (nothing learned yet)', 20000);
+  for (const [zone, card] of [['R', 'S9'], ['U', 'H3']]) {
+    await host.click('.zone[data-zone="' + zone + '"]');
+    await host.click('#pickerSuits button[data-suit="' + card[0] + '"]');
+    await host.click('#pickerRanks button[data-rank="' + card.slice(1) + '"]');
+  }
+  await until(() => host.evaluate(() => !document.getElementById('mainButton').disabled), 'learning round can be confirmed');
+  await host.click('#mainButton');
+  await until(() => learner.evaluate(() => !!window.__readerState.deck.S9 && !!window.__readerState.deck.H3), 'reader learned both cards after the round was confirmed', 10000);
+  await learner.evaluate(() => window.__fake.place([]));
+  step('no deck registered: both cards flagged, host picked them, reader learned ♠9 and ♥3 on confirm');
+  // With two cards learned the reader recognises ♠9 again, but must only suggest it: a deck this
+  // incomplete would force unlearned cards onto their nearest neighbour.
+  await until(() => host.evaluate(() => !document.getElementById('mainButton').disabled), 'next round can start');
+  await host.click('#mainButton');
+  await until(() => host.evaluate(() => document.getElementById('phaseBox').dataset.phase === 'dealing'), 'partial-deck round dealing', 15000);
+  await learner.evaluate(([r, u]) => window.__fake.place([{ card: 'S9', h: 230, x: r.x + 6, y: r.y - 4 }, { card: 'H3', h: 230, x: u.x, y: u.y }]), [centre('R'), centre('U')]);
+  await until(() => host.evaluate(() => document.querySelectorAll('.zone.unsure').length === 2), 'still flagged, not filled in', 20000);
+  await host.click('.zone[data-zone="R"]');
+  const suggestion = await host.evaluate(() => (document.querySelector('#pickerQuick button') || {}).textContent || '');
+  assert.ok(suggestion.includes('♠9'), 'the learned card is offered as the first suggestion: ' + suggestion);
+  await host.click('#pickerQuick button');
+  await host.click('.zone[data-zone="U"]'); await host.click('#pickerQuick button');
+  await until(() => host.evaluate(() => !document.getElementById('mainButton').disabled), 'partial-deck round can be confirmed');
+  await host.click('#mainButton');
+  await learner.evaluate(() => window.__fake.place([]));
+  await learnerContext.close();
+  step('partial deck: the learned ♠9 is offered as a one-tap suggestion, never filled in automatically');
+
   /* Round 4: the real reader page reads cards from a synthetic camera. */
   const readerPage = await (await browser.newContext({ viewport: { width: 1100, height: 900 } })).newPage();
   readerPage.on('pageerror', error => errors.push(error.message));
@@ -159,6 +206,9 @@ const card = (socket, table, zone, value) => socket.send(JSON.stringify({ t: 'zo
     await until(() => readerPage.evaluate(() => Object.values(window.__readerState.zoneState).every(zs => zs.status === 'empty')), 'zone empty again', 5000);
   }
   step('reader page registered 16 cards through its own registration flow');
+  // Fill in the rest of the deck (automatic reading starts once every rank and suit is covered).
+  await readerPage.evaluate(() => document.getElementById('quickDeck').click());
+  await until(() => readerPage.evaluate(() => Object.keys(window.__readerState.deck).length === 52), 'rest of the deck registered', 30000);
   await readerPage.click('#modeTabs button[data-mode="run"]');
 
   await host.click('#tableTabs button[data-table="duel"]');
