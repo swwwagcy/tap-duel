@@ -26,7 +26,7 @@ const server = http.createServer((request, response) => {
 async function playRound(page, table, spot) {
   const frame = name => page.frame({ url: new RegExp(name + '\\.html') });
   const host = frame('host'), viewer = frame('play'), reader = frame('reader');
-  await until(() => reader.evaluate(() => window.__readerState && Object.keys(window.__readerState.deck).length === 52 && !!window.__readerState.empty), table + ': reader set up (camera, empty table, 52 cards)', 40000);
+  await until(() => reader.evaluate(() => window.__readerState && !!window.__readerState.frame), table + ': reader camera running', 40000);
   await until(() => host.evaluate(() => document.querySelector('.zone') && !document.getElementById('mainButton').disabled), table + ': host ready');
   const before = await viewer.evaluate(() => Number(document.getElementById('points').textContent.replace(/,/g, '')));
   await host.click('#mainButton');

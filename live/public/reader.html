@@ -19,23 +19,16 @@
   #overlay { touch-action: none; }
   .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
   .readouts { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; align-content: start; }
-  #panelRun, #panelDeck { flex-wrap: nowrap; }
+  #panelRun { flex-wrap: nowrap; }
   .readout { background: var(--surface); border-radius: 10px; padding: 8px; display: flex; gap: 8px; align-items: center; font-size: 14px; }
   .readout .cardface { font-size: 18px; }
   .readout .label { font-weight: 700; }
   .readout .diag { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
   .readout .why { font-size: 12px; color: var(--wait); }
-  .decknote { background: var(--surface); border: 2px solid var(--line); border-radius: 10px; padding: 8px 12px; font-size: 14px; color: var(--muted); }
   .blocker { background: var(--wait); color: #1d1503; border-radius: 10px; padding: 8px 12px; font-weight: 700; }
   .readout.red .label { color: var(--red); } .readout.blue .label { color: var(--blue); }
-  .prompt { font-size: 22px; font-weight: 700; }
-  .deck { display: grid; grid-template-columns: repeat(13, 1fr); gap: 3px; font-size: 12px; }
-  .deck span { text-align: center; padding: 3px 0; border-radius: 4px; background: var(--surface-2); color: var(--muted); font-family: var(--font-num); }
-  .deck span.done { background: var(--go); color: #04170f; font-weight: 700; }
-  .deck span.now { outline: 2px solid var(--wait); }
-  .deck span.red.done { color: #6b0d07; }
   p.note { margin: 0; color: var(--muted); font-size: 14px; }
-  @media (max-width: 640px) { .bar { grid-template-columns: 1fr; } .deck { grid-template-columns: repeat(13, minmax(0, 1fr)); font-size: 10px; } }
+  @media (max-width: 640px) { .bar { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
@@ -45,7 +38,6 @@
     <div class="tabs" id="modeTabs">
       <button type="button" data-mode="run" class="on">運行</button>
       <button type="button" data-mode="zones">調整牌位</button>
-      <button type="button" data-mode="deck">登記牌組</button>
     </div>
   </div>
   <div class="status">
@@ -59,46 +51,31 @@
     <div class="hint" id="hint">手機架在牌桌正上方 30–40 公分，鏡頭朝下，讓所有牌位都在畫面裡。</div>
   </div>
 
-  <!-- Camera and empty-table controls stay visible in every mode: setting up positions and
-       registering the deck both need them. -->
+  <!-- Camera controls stay visible in every mode. -->
   <section class="controls" id="cameraBar">
     <button class="primary" id="startCamera" type="button">開始相機</button>
     <button id="fakeCamera" type="button" hidden>使用模擬攝影機</button>
-    <button id="captureEmpty" type="button" disabled title="先開始相機">拍空桌</button>
-    <span id="emptyText" class="muted">先開始相機，再清空桌面按「拍空桌」</span>
     <label id="autoDealLabel" hidden style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="autoDeal" checked style="width:22px;height:22px;min-height:0">自動出牌（模擬）</label>
   </section>
 
   <section id="panelRun" class="controls" style="flex-direction:column;align-items:stretch">
     <div class="blocker" id="blocker" hidden></div>
-    <div class="decknote" id="deckNote" hidden></div>
     <div class="readouts" id="readouts"></div>
-    <p class="note">流程：調整牌位 → 清空桌面按「拍空桌」 → 運行。登記牌組是選用的：不登記也能開始，每張牌由主持台手選；登記後才會自動讀牌。相機或燈光移動過，要重新拍空桌。桌面要比牌暗。</p>
+    <p class="note">流程：開始相機 → 到「調整牌位」把框對準桌上的牌位（框比牌大一圈）→ 回到「運行」。不用登記牌組，也不用拍空桌。牌面要朝上、牌角的點數與花色要看得清楚；桌面顏色要和牌有明顯差別。</p>
   </section>
 
   <section id="panelZones" class="controls" hidden>
-    <p class="note" style="flex-basis:100%">拖曳框框移動位置，拖右下角的方塊調整大小。框要比牌大一圈，牌放歪也還在框內。改完之後要重新拍空桌。</p>
+    <p class="note" style="flex-basis:100%">拖曳框框移動位置，拖右下角的方塊調整大小。框要比牌大一圈，四邊都要看得到桌面，牌放歪也還在框內。</p>
     <button id="resetZones" type="button">恢復預設位置</button>
   </section>
 
-  <section id="panelDeck" class="controls" style="flex-direction:column;align-items:stretch" hidden>
-    <div class="prompt" id="deckPrompt">先拍空桌，才能登記牌組。</div>
-    <div class="controls">
-      <button id="quickDeck" type="button" hidden>快速登記 52 張（模擬牌）</button>
-      <button id="deckSkip" type="button">跳過這張</button>
-      <button id="deckRedo" type="button">重拍上一張</button>
-      <button class="danger" id="deckClear" type="button">清除全部</button>
-      <span id="deckCount" class="muted"></span>
-    </div>
-    <div class="deck" id="deckGrid"></div>
-    <p class="note">選用：登記完 52 張就能自動讀牌；不登記也能運行，每張牌由主持台手選。把提示的牌正面朝上放進任何一個牌位，放穩後會自動拍下，拿開之後換下一張。同一副牌換到另一款遊戲也能用，不用重新登記。</p>
-  </section>
 </div>
 <div id="toast" class="toast" role="status"></div>
 <canvas id="work" hidden></canvas>
 <script src="games.js"></script>
 <script src="engine.js"></script>
 <script src="recognizer.js"></script>
+<script src="ocr.js"></script>
 <script src="demo-camera.js"></script>
 <script src="common.js"></script>
 <script src="reader.js"></script>

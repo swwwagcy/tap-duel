@@ -1,7 +1,7 @@
 // End to end: starts the server, opens the viewer and host pages in a browser, and plays rounds.
 // Rounds 1-3 feed cards through a scripted reader connection (exact cards, checks the money);
-// round 4 uses the real reader page looking at a synthetic camera: it registers part of the deck
-// through its own UI and must then read the dealt cards by itself.
+// round 4 uses the real reader page looking at a synthetic camera: with nothing registered, it
+// must read the dealt cards by itself.
 'use strict';
 const path = require('path');
 const { spawn } = require('child_process');
@@ -118,84 +118,28 @@ const card = (socket, table, zone, value) => socket.send(JSON.stringify({ t: 'zo
   step('manual correction wins over the camera; cancelling returns every point');
   reader.close();
 
-  /* The real camera path: start the (fake) webcam and take the empty table from another mode. */
+  /* The real camera path: start the (fake) webcam; frames must flow with no further setup. */
   const cameraContext = await browser.newContext({ viewport: { width: 1000, height: 900 } });
   await cameraContext.grantPermissions(['camera']);
   const cameraPage = await cameraContext.newPage();
   cameraPage.on('pageerror', error => errors.push(error.message));
   await cameraPage.goto(BASE + '/reader.html#key=' + KEY);
   await until(() => cameraPage.evaluate(() => document.querySelectorAll('#tableTabs button').length === 2), 'camera reader tabs');
-  await cameraPage.click('#modeTabs button[data-mode="zones"]');
-  assert.ok(await cameraPage.isVisible('#captureEmpty'), 'the empty-table button is visible while adjusting positions');
   await cameraPage.click('#startCamera');
-  await until(() => cameraPage.evaluate(() => !document.getElementById('captureEmpty').disabled && !!window.__readerState.frame), 'camera picture ready', 10000);
-  await cameraPage.click('#captureEmpty');
-  assert.ok(await cameraPage.evaluate(() => !!window.__readerState.empty && window.__readerState.width > 0), 'empty table captured from the positions mode');
-  await cameraPage.click('#modeTabs button[data-mode="deck"]');
-  assert.ok(await cameraPage.evaluate(() => document.getElementById('deckPrompt').textContent.includes('放進任一牌位')), 'deck mode is ready once the empty table is taken');
+  await until(() => cameraPage.evaluate(() => !!window.__readerState.frame && window.__readerState.width > 0 && window.__readerState.ticks.length > 3), 'camera frames flowing', 10000);
+  assert.strictEqual(await cameraPage.locator('#captureEmpty, [data-mode="deck"]').count(), 0, 'no empty-table or deck step in the reader');
   await cameraContext.close();
-  step('real camera path: webcam starts, empty table taken while adjusting positions, deck mode ready');
+  step('real camera path: webcam starts and frames flow, with no empty-table or deck step');
 
-  /* No deck registered: every card goes to the host, and nothing is learned from the host's picks. */
-  const learnerContext = await browser.newContext({ viewport: { width: 1100, height: 900 } });
-  const learner = await learnerContext.newPage();
-  learner.on('pageerror', error => errors.push(error.message));
-  await learner.goto(BASE + '/reader.html#key=' + KEY);
-  await learner.evaluate(() => { window.__fake = DemoCamera.source(1280, 720); window.__readerSource = window.__fake.canvas; });
-  await until(() => learner.evaluate(() => document.querySelectorAll('#tableTabs button').length === 2), 'learner tabs');
-  await learner.click('#tableTabs button[data-table="duel"]');
-  await learner.click('#startCamera');
-  await wait(500);
-  await learner.click('#captureEmpty');
-  assert.strictEqual(await learner.evaluate(() => Object.keys(window.__readerState.deck).length), 0, 'learner starts with no deck');
-  await host.click('#tableTabs button[data-table="duel"]');
-  await until(() => host.evaluate(() => document.querySelectorAll('.zone').length === 2 && !document.getElementById('mainButton').disabled), 'host on duel');
-  await host.click('#mainButton');
-  await until(() => host.evaluate(() => document.getElementById('phaseBox').dataset.phase === 'dealing'), 'learning round dealing', 15000);
-  const centre = zone => ({ x: (zone === 'R' ? 0.29 : 0.71) * 1280, y: 0.5 * 720 });
-  await learner.evaluate(([r, u]) => window.__fake.place([{ card: 'S9', h: 230, x: r.x, y: r.y }, { card: 'H3', h: 230, x: u.x, y: u.y }]), [centre('R'), centre('U')]);
-  await until(() => host.evaluate(() => document.querySelectorAll('.zone.unsure').length === 2), 'both flagged for the host (nothing learned yet)', 20000);
-  for (const [zone, card] of [['R', 'S9'], ['U', 'H3']]) {
-    await host.click('.zone[data-zone="' + zone + '"]');
-    await host.click('#pickerSuits button[data-suit="' + card[0] + '"]');
-    await host.click('#pickerRanks button[data-rank="' + card.slice(1) + '"]');
-  }
-  await until(() => host.evaluate(() => !document.getElementById('mainButton').disabled), 'learning round can be confirmed');
-  await host.click('#mainButton');
-  await until(() => host.evaluate(() => document.getElementById('phaseBox').dataset.phase === 'result'), 'no-deck round settled');
-  await wait(800);
-  assert.strictEqual(await learner.evaluate(() => Object.keys(window.__readerState.deck).length), 0, 'the reader does not learn from the host\'s picks');
-  await learner.evaluate(() => window.__fake.place([]));
-  await learnerContext.close();
-  step('no deck registered: both cards flagged, host picked them, round settled, nothing learned');
-
-  /* Round 4: the real reader page reads cards from a synthetic camera. */
+  /* Round 4: the real reader page reads cards from a synthetic camera, with nothing registered. */
   const readerPage = await (await browser.newContext({ viewport: { width: 1100, height: 900 } })).newPage();
   readerPage.on('pageerror', error => errors.push(error.message));
   await readerPage.goto(BASE + '/reader.html#key=' + KEY);
-  await readerPage.addScriptTag({ path: path.join(__dirname, '..', 'public', 'demo-camera.js') });
-  await readerPage.addScriptTag({ path: path.join(__dirname, 'synthetic.js') });
-  await readerPage.evaluate(() => { window.__fake = SyntheticSource(1280, 720); window.__readerSource = window.__fake.canvas; });
+  await readerPage.evaluate(() => { window.__fake = DemoCamera.source(1920, 1080); window.__readerSource = window.__fake.canvas; });
   await until(() => readerPage.evaluate(() => document.querySelectorAll('#tableTabs button').length === 2), 'reader tabs');
   await readerPage.click('#tableTabs button[data-table="duel"]');
   await readerPage.click('#startCamera');
   await wait(500);
-  await readerPage.click('#captureEmpty');
-  await readerPage.click('#modeTabs button[data-mode="deck"]');
-  // Register the 13 spades and the first 3 hearts by placing whatever card the page asks for.
-  const zone = { x: (0.14 + 0.15) * 1280, y: (0.22 + 0.28) * 720 };
-  for (let index = 0; index < 16; index++) {
-    const wanted = await readerPage.evaluate(() => window.__readerState.deckCard);
-    await readerPage.evaluate(([value, x, y]) => window.__fake.place([{ card: value, h: 230, x: x + (Math.random() - 0.5) * 20, y: y + (Math.random() - 0.5) * 20, angle: (Math.random() - 0.5) * 0.05 }]), [wanted, zone.x, zone.y]);
-    await until(() => readerPage.evaluate(value => !!window.__readerState.deck[value], wanted), 'register ' + wanted, 8000);
-    await readerPage.evaluate(() => window.__fake.place([]));
-    await until(() => readerPage.evaluate(() => Object.values(window.__readerState.zoneState).every(zs => zs.status === 'empty')), 'zone empty again', 5000);
-  }
-  step('reader page registered 16 cards through its own registration flow');
-  // Fill in the rest of the deck (automatic reading starts once every rank and suit is covered).
-  await readerPage.evaluate(() => document.getElementById('quickDeck').click());
-  await until(() => readerPage.evaluate(() => Object.keys(window.__readerState.deck).length === 52), 'rest of the deck registered', 30000);
-  await readerPage.click('#modeTabs button[data-mode="run"]');
 
   await host.click('#tableTabs button[data-table="duel"]');
   await viewer.click('#tableTabs button[data-table="duel"]');
@@ -204,8 +148,8 @@ const card = (socket, table, zone, value) => socket.send(JSON.stringify({ t: 'zo
   await until(() => viewer.evaluate(() => !document.querySelector('.spot[data-spot="U"]').disabled), 'round 4 open');
   await viewer.click('.chip[data-chip="100"]'); await viewer.click('.spot[data-spot="U"]');
   await until(() => host.evaluate(() => document.getElementById('phaseBox').dataset.phase === 'dealing'), 'round 4 dealing', 12000);
-  const red = { x: (0.14 + 0.15) * 1280, y: (0.22 + 0.28) * 720 }, blue = { x: (0.56 + 0.15) * 1280, y: (0.22 + 0.28) * 720 };
-  await readerPage.evaluate(([r, b]) => window.__fake.place([{ card: 'S9', h: 230, x: r.x + 12, y: r.y - 8, angle: 0.06 }, { card: 'H3', h: 230, x: b.x - 10, y: b.y + 6, angle: -0.05, flip: true }]), [red, blue]);
+  const red = { x: (0.14 + 0.15) * 1920, y: (0.22 + 0.28) * 1080 }, blue = { x: (0.56 + 0.15) * 1920, y: (0.22 + 0.28) * 1080 };
+  await readerPage.evaluate(([r, b]) => window.__fake.place([{ card: 'S9', h: 420, x: r.x + 12, y: r.y - 8, angle: 0.06 }, { card: 'H3', h: 420, x: b.x - 10, y: b.y + 6, angle: -0.05, flip: true }]), [red, blue]);
   // Each zone must end either read by the camera as the true card, or flagged for the host. A
   // confident wrong card is the one outcome that is never acceptable.
   const truth = { R: 'S9', U: 'H3' };

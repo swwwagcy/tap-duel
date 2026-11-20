@@ -18,7 +18,9 @@
   };
 
   // palette (optional): ink colour per suit, e.g. { D: '#11a99a' } for a deck with teal diamonds.
-  function drawCard(ctx, card, cw, ch, palette) {
+  // font (optional): typeface of the index and court letters.
+  function drawCard(ctx, card, cw, ch, palette, font) {
+    font = font || 'Arial, sans-serif';
     var suit = card[0], rank = card.slice(1), red = suit === 'H' || suit === 'D';
     var ink = (palette && palette[suit]) || (red ? '#c8102e' : '#111');
     ctx.fillStyle = '#f7f7f2';
@@ -33,7 +35,7 @@
     ctx.closePath(); ctx.fill(); ctx.stroke();
     ctx.fillStyle = ink; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     function index() {
-      ctx.font = 'bold ' + Math.round(ch * 0.15) + 'px Arial, sans-serif';
+      ctx.font = 'bold ' + Math.round(ch * 0.15) + 'px ' + font;
       ctx.fillText(rank, -cw / 2 + cw * 0.13, -ch / 2 + ch * 0.1);
       ctx.font = Math.round(ch * 0.12) + 'px Arial, sans-serif';
       ctx.fillText(SYMBOL[suit], -cw / 2 + cw * 0.13, -ch / 2 + ch * 0.22);
@@ -78,7 +80,7 @@
       placed.forEach(function (p) {
         context.save(); context.translate(p.x, p.y); context.rotate((p.angle || 0) + (p.flip ? Math.PI : 0));
         context.shadowColor = 'rgba(0,0,0,0.35)'; context.shadowBlur = 4; context.shadowOffsetY = 2;
-        drawCard(context, p.card, p.h * 0.716, p.h, options.palette);
+        drawCard(context, p.card, p.h * 0.716, p.h, options.palette, options.font);
         context.restore();
       });
       var image = context.getImageData(0, 0, width, height);

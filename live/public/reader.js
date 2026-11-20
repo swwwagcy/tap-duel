@@ -1,22 +1,24 @@
-// Reader: a phone above the table. It watches each card position, reads a card once it rests,
-// and tells the server what it saw. It also sends a small picture of the table for viewers.
+// Reader: a phone above the table. It watches each card position, reads a card once it rests
+// (ocr.js: no deck registration, no photo of the empty table), and tells the server what it saw.
+// It also sends a small picture of the table for viewers.
 (function () {
   'use strict';
   var $ = Live.$, R = Recognizer;
   var TICK_MS = 140;               // about 7 frames a second
   var STILL_FRAMES = 3;            // a card must rest this many frames before it is read
-  var READ_FRAMES = 3;             // frames averaged into one reading
+  var READ_FRAMES = 3;             // separate frames read for one answer
   var EMPTY_FRAMES = 3;            // frames without a card before a position counts as empty
-  var READ_ATTEMPTS = 3;           // an unsure reading is retried with fresh frames this many times
-  var MIN_CARD_PX = 120;           // below this the camera is too far away to read reliably
+  var READ_ATTEMPTS = 3;           // an unsure answer is retried with fresh frames this many times
+  var MIN_CARD_PX = 240;           // recommended card height in the picture
+  var HARD_MIN_CARD_PX = 150;      // below this a reading is never trusted
+  var SEARCH_MARGIN = 0.08;        // the card is looked for a little beyond the drawn frame
   var FRAME_SEND_MS = 700;
-  var WORK_MAX_WIDTH = 1280;
+  var WORK_MAX_WIDTH = 1920;
 
   var state = {
     tableId: ((/[?&]table=(\w+)/.exec(location.search) || [])[1] || Live.store.get('tdl-reader-table', 'duel')), mode: 'run',
-    source: null, width: 0, height: 0, frame: null, empty: null, emptySigs: {},
-    zones: {}, zoneState: {}, deck: Live.store.get('tdl-deck', {}), model: null,
-    deckCard: null, lastRegistered: null, table: null,
+    source: null, width: 0, height: 0, frame: null,
+    zones: {}, zoneState: {}, table: null,
     lastSize: 0, ticks: [], frameSentAt: 0, statusSentAt: 0, drag: null
   };
   var work = $('work'), workContext = null, overlay = $('overlay');
@@ -29,7 +31,7 @@
       onStatus: function (online) { if (!online) setPhase(null); },
       onMessage: function (message) {
         if (message.t === 'denied') { link.close(); Live.askStaffKey(start, true); return; }
-        if (message.t === 'welcome') { buildTableTabs(message.tables); link.send({ t: 'watch', table: state.tableId }); if (/[?&]autostart\b/.test(location.search) && Live.demo && !state.source) autoStart(); }
+        if (message.t === 'welcome') { buildTableTabs(message.tables); link.send({ t: 'watch', table: state.tableId }); if (/[?&]autostart\b/.test(location.search) && Live.demo && !state.source) startFake(); }
         else if (message.t === 'table' && message.table.id === state.tableId) { state.table = message.table; setPhase(message.table); }
         else if (message.t === 'error') Live.toast(message.text, 'bad');
       }
@@ -62,41 +64,56 @@
     });
   }
 
-  /* ---------------- per-table setup: positions and the empty table ---------------- */
+  /* ---------------- per-table setup: where the card positions are ---------------- */
   function loadTable() {
     var stored = Live.store.get('tdl-zones-' + state.tableId, null), layout = game().layout;
     state.zones = {};
     game().zones.forEach(function (zone) { state.zones[zone.id] = (stored && stored[zone.id]) ? stored[zone.id].slice() : layout[zone.id].slice(); });
     resetZoneStates();
-    state.empty = null; state.emptySigs = {};
-    $('emptyText').textContent = '尚未拍空桌';
-    var saved = Live.store.get('tdl-empty-' + state.tableId, null);
-    if (saved && state.width) {
-      var image = new Image();
-      image.onload = function () {
-        workContext.drawImage(image, 0, 0, state.width, state.height);
-        state.empty = workContext.getImageData(0, 0, state.width, state.height);
-        computeEmptySigs();
-        $('emptyText').textContent = '空桌：' + new Date(saved.at).toLocaleString('zh-TW', { hour12: false }) + (saved.w !== state.width || saved.h !== state.height ? '（解析度不同，建議重拍）' : '');
-      };
-      image.src = saved.image;
-    }
-    buildReadouts(); renderDeck();
+    buildReadouts();
   }
   function resetZoneStates() {
     state.zoneState = {};
-    game().zones.forEach(function (zone) { state.zoneState[zone.id] = { status: 'empty', still: 0, emptyCount: EMPTY_FRAMES, samples: [], prev: null, result: null, reported: 'empty' }; });
+    game().zones.forEach(function (zone) { state.zoneState[zone.id] = { status: 'empty', still: 0, emptyCount: EMPTY_FRAMES, reads: [], prev: null, result: null, reported: 'empty' }; });
   }
   function rectOf(zoneId) {
     var z = state.zones[zoneId];
     return { x: z[0] * state.width, y: z[1] * state.height, w: z[2] * state.width, h: z[3] * state.height };
   }
-  function computeEmptySigs() {
-    state.emptySigs = {};
-    if (!state.empty) return;
-    game().zones.forEach(function (zone) { state.emptySigs[zone.id] = R.signature(state.empty, rectOf(zone.id)); });
+  // The frame grown a little on every side: where the card is looked for, so a card that pokes
+  // out of a tightly drawn frame is still found whole.
+  function searchRect(zoneId) {
+    var rect = rectOf(zoneId), dx = rect.w * SEARCH_MARGIN, dy = rect.h * SEARCH_MARGIN;
+    var x0 = Math.max(0, rect.x - dx), y0 = Math.max(0, rect.y - dy);
+    return { x: x0, y: y0, w: Math.min(state.width, rect.x + rect.w + dx) - x0, h: Math.min(state.height, rect.y + rect.h + dy) - y0 };
   }
-  function saveZones() { Live.store.set('tdl-zones-' + state.tableId, state.zones); computeEmptySigs(); resetZoneStates(); }
+  function saveZones() { Live.store.set('tdl-zones-' + state.tableId, state.zones); resetZoneStates(); }
+
+  // The table's colour at one position, measured on every frame from the rim of the search area
+  // (the darker half of it, so a card that reaches the rim does not count as table). This replaces
+  // a stored photo of the empty table, and follows the light as it changes.
+  var rimPixel = [0, 0, 0];
+  function tableColour(frame, rect) {
+    var samples = [], steps = 16, index;
+    function take(x, y) {
+      var px = Math.max(0, Math.min(frame.width - 1, x | 0)), py = Math.max(0, Math.min(frame.height - 1, y | 0)), at = (py * frame.width + px) * 4;
+      samples.push([frame.data[at], frame.data[at + 1], frame.data[at + 2], frame.data[at] + frame.data[at + 1] + frame.data[at + 2]]);
+    }
+    for (index = 0; index < steps; index++) {
+      var along = (index + 0.5) / steps;
+      take(rect.x + along * rect.w, rect.y + 1); take(rect.x + along * rect.w, rect.y + rect.h - 2);
+      take(rect.x + 1, rect.y + along * rect.h); take(rect.x + rect.w - 2, rect.y + along * rect.h);
+    }
+    samples.sort(function (a, b) { return a[3] - b[3]; });
+    var half = samples.slice(0, samples.length >> 1), middle = half[half.length >> 1];
+    rimPixel = [middle[0], middle[1], middle[2]];
+    return rimPixel;
+  }
+  function flatSignature(colour, length) {
+    var out = new Float32Array(length);
+    for (var index = 0; index < length; index += 3) { out[index] = colour[0]; out[index + 1] = colour[1]; out[index + 2] = colour[2]; }
+    return out;
+  }
 
   /* ---------------- camera ---------------- */
   $('startCamera').addEventListener('click', function () {
@@ -128,23 +145,11 @@
     $('hint').hidden = true;
     $('video').hidden = source.tagName !== 'VIDEO';
     $('startCamera').textContent = '相機運行中'; $('startCamera').disabled = true;
-    $('captureEmpty').disabled = false; $('captureEmpty').title = '';
+    CardOCR.build();
     loadTable();
-    if (!state.empty) $('emptyText').textContent = '清空桌面後按「拍空桌」';
     Live.keepAwake();
     tick();
   }
-
-  $('captureEmpty').addEventListener('click', function () {
-    if (!state.frame) { Live.toast('相機畫面還沒準備好，請稍等一下再按。', 'bad'); return; }
-    state.empty = new ImageData(new Uint8ClampedArray(state.frame.data), state.width, state.height);
-    computeEmptySigs(); resetZoneStates();
-    var saved = { image: work.toDataURL('image/jpeg', 0.92), w: state.width, h: state.height, at: Date.now() };
-    if (!Live.store.set('tdl-empty-' + state.tableId, saved)) Live.toast('空桌已拍，但這台裝置存不下，重新整理後要重拍。');
-    $('emptyText').textContent = '空桌：剛剛拍好';
-    Live.toast('已拍空桌。', 'good');
-    renderDeck();
-  });
 
   /* ---------------- main loop ---------------- */
   function tick() {
@@ -168,60 +173,62 @@
   }
 
   function process() {
-    if (!state.empty) return;
     var frame = state.frame, defaults = R.DEFAULTS;
     game().zones.forEach(function (zone) {
-      var zs = state.zoneState[zone.id], rect = rectOf(zone.id);
-      var sig = R.signature(frame, rect), covered = R.coverage(sig, state.emptySigs[zone.id]);
+      var zs = state.zoneState[zone.id], rect = searchRect(zone.id);
+      var table = tableColour(frame, rect);
+      var sig = R.signature(frame, rect), covered = R.coverage(sig, flatSignature(table, sig.length));
       var moved = zs.prev ? R.motion(sig, zs.prev) : 99;
       zs.prev = sig; zs.coverage = covered; zs.moving = moved; zs.why = '';
       if (covered < defaults.presence * 0.5) {
-        zs.still = 0; zs.samples = []; zs.attempts = 0;
+        zs.still = 0; zs.reads = []; zs.attempts = 0; zs.height = 0;
         if (++zs.emptyCount >= EMPTY_FRAMES && zs.status !== 'empty') { zs.status = 'empty'; zs.result = null; report(zone.id, { state: 'empty' }); }
         return;
       }
       zs.emptyCount = 0;
       if (covered < defaults.presence) { zs.why = '變化太小，看不出有牌'; return; }
-      if (moved > defaults.stillness) { zs.why = '畫面在動，等牌放穩'; }
-      if (moved > defaults.stillness) { zs.still = 0; zs.samples = []; zs.attempts = 0; zs.status = 'busy'; return; }
+      if (moved > defaults.stillness) { zs.why = '畫面在動，等牌放穩'; zs.still = 0; zs.reads = []; zs.attempts = 0; zs.status = 'busy'; return; }
       zs.still++;
       if (zs.status !== 'busy' && zs.status !== 'empty') return;      // this placement was already read
-      if (zs.still < STILL_FRAMES) return;
-      var found = R.locate(frame, state.empty, rect);
+      if (zs.still < STILL_FRAMES || state.mode !== 'run') return;
+      var found = R.locate(frame, { colour: table }, rect);
       if (!found) {
-        zs.why = '找不到牌的輪廓（桌面太亮或光線變了？可以重拍空桌）';
-        if (zs.still > STILL_FRAMES + 8) finish(zone.id, zs, rect, null);
+        zs.why = '找不到牌的輪廓（牌和桌面的顏色太接近？）';
+        if (zs.still > STILL_FRAMES + 8) finish(zone.id, zs, rect);
         return;
       }
-      state.lastSize = Math.round(found.h); zs.height = Math.round(found.h); zs.lightTable = !!found.lightTable;
-      zs.samples.push(state.mode === 'deck' ? R.describeRaw(frame, found) : R.describeProbe(frame, found));
-      if (zs.samples.length >= READ_FRAMES) finish(zone.id, zs, rect, found);
+      state.lastSize = Math.round(found.h); zs.height = Math.round(found.h);
+      var reading = CardOCR.read(frame, found);
+      if (found.h < HARD_MIN_CARD_PX) { reading.sure = false; reading.problem = 'card too small'; }
+      zs.reads.push(reading);
+      if (zs.reads.length >= READ_FRAMES) finish(zone.id, zs, rect);
     });
   }
 
-  function finish(zoneId, zs, rect, found) {
-    var samples = zs.samples; zs.samples = [];
-    if (state.mode === 'deck') { register(zs, samples, found); return; }
-    if (state.mode !== 'run') { zs.status = 'unsure'; return; }
-    var shot = cropShot(rect);
-    var model = getModel();
-    if (!found || !model) {
-      zs.status = 'unsure'; zs.result = null;
-      report(zoneId, { state: 'unsure', top: [], shot: shot });
-      return;
-    }
-    var result = R.match(R.averageProbe(samples), model);
-    // With only part of the deck registered, the best match can only be a registered card; one that
-    // was not registered would be forced onto its nearest neighbour. Until the registered cards
-    // cover every rank and suit, a reading is only a suggestion for the host.
-    if (!deckCovered()) { result.sure = false; result.partial = true; }
-    zs.result = result;
+  // Several frames were read separately. The card is accepted when at least two of them are sure
+  // of the same card and none is sure of a different one.
+  function decide(reads) {
+    var votes = {}, lead = null;
+    reads.forEach(function (reading) { if (reading.sure) votes[reading.card] = (votes[reading.card] || 0) + 1; });
+    var cards = Object.keys(votes);
+    var best = reads.filter(function (reading) { return reading.card; }).sort(function (a, b) { return b.score - a.score; })[0] || null;
+    if (cards.length === 1 && votes[cards[0]] >= 2) lead = reads.filter(function (reading) { return reading.sure; })[0];
+    return { sure: !!lead, reading: lead || best };
+  }
+  var PROBLEMS = { 'no index found': '找不到牌角的點數', 'no suit under the rank': '點數下方找不到花色', 'suit size does not fit the rank': '花色大小不合理', 'only one corner readable': '只有一個牌角讀得到', 'corners disagree': '兩個牌角讀到的不一樣', 'card too small': '牌在畫面中太小' };
+
+  function finish(zoneId, zs, rect) {
+    var reads = zs.reads; zs.reads = [];
+    var verdict = decide(reads), reading = verdict.reading;
+    zs.result = reading;
     zs.attempts = (zs.attempts || 0) + 1;
-    if (!result.sure && zs.attempts < READ_ATTEMPTS) { zs.status = 'busy'; return; }   // read again with fresh frames
-    zs.status = result.sure ? 'card' : 'unsure';
-    report(zoneId, result.sure
-      ? { state: 'card', card: result.card, score: round(result.score), margin: round(result.margin), top: compactTop(result.top), shot: shot }
-      : { state: 'unsure', top: compactTop(result.top), shot: shot });
+    if (!verdict.sure && zs.attempts < READ_ATTEMPTS) { zs.status = 'busy'; zs.still = 0; return; }   // read again with fresh frames
+    zs.status = verdict.sure ? 'card' : 'unsure';
+    if (!verdict.sure) zs.why = reading && reading.problem ? (PROBLEMS[reading.problem] || reading.problem) : reading ? '把握不夠' : '讀不到牌';
+    var shot = cropShot(rectOf(zoneId));
+    report(zoneId, verdict.sure
+      ? { state: 'card', card: reading.card, score: round(reading.score), margin: round(reading.margin), top: compactTop(reading.top), shot: shot }
+      : { state: 'unsure', top: compactTop(reading && reading.top), shot: shot });
   }
   function round(value) { return Math.round(value * 1000) / 1000; }
   function compactTop(top) { return (top || []).map(function (item) { return { card: item.card, score: round(item.score) }; }); }
@@ -255,88 +262,23 @@
   function sendStatus() {
     var fps = state.ticks.length / 2;
     var warnings = [];
-    if (!state.empty) warnings.push('未拍空桌');
-    if (!deckCovered()) warnings.push(Object.keys(state.deck).length ? '牌組 ' + Object.keys(state.deck).length + '/52' : '未登記牌組（手選）');
     if (state.lastSize && state.lastSize < MIN_CARD_PX) warnings.push('牌在畫面中太小');
     if (Live.awake !== 'on') warnings.push(Live.awake === 'unsupported' ? '這個瀏覽器無法保持螢幕常亮' : '螢幕常亮未開啟，點一下畫面');
     var text = fps.toFixed(0) + ' fps' + (state.lastSize ? '・牌高 ' + state.lastSize + 'px' : '') + (warnings.length ? '・' + warnings.join('・') : '');
     $('statusText').textContent = text;
-    $('sizeText').innerHTML = state.lastSize && state.lastSize < MIN_CARD_PX ? '<span class="warn">牌太小，請把手機拉近（至少 ' + MIN_CARD_PX + 'px）</span>' : '';
+    $('sizeText').innerHTML = state.lastSize && state.lastSize < MIN_CARD_PX ? '<span class="warn">牌太小，請把手機拉近或把牌位排大一點（建議 ' + MIN_CARD_PX + 'px 以上）</span>' : '';
     if (Date.now() - state.statusSentAt < 2000) return;
     state.statusSentAt = Date.now();
     send({ t: 'status', text: text });
   }
-
-  /* ---------------- reference images of the deck ---------------- */
-
-  // Enough of the deck registered to read on its own: every rank in at least two suits and every
-  // suit in at least six ranks. Rank and suit are judged separately, so a card can be read without
-  // that exact card registered, as long as its rank and its suit are.
-  function deckCovered() {
-    var suitsPerRank = {}, ranksPerSuit = {};
-    Object.keys(state.deck).forEach(function (card) {
-      var rank = Games.rankOf(card), suit = Games.suitOf(card);
-      suitsPerRank[rank] = (suitsPerRank[rank] || 0) + 1; ranksPerSuit[suit] = (ranksPerSuit[suit] || 0) + 1;
-    });
-    return Games.RANKS.every(function (rank) { return (suitsPerRank[rank] || 0) >= 2; }) && Games.SUITS.every(function (suit) { return (ranksPerSuit[suit] || 0) >= 6; });
-  }
-
-  function getModel() {
-    if (state.model) return state.model;
-    var entries = Object.keys(state.deck).map(function (card) { return { card: card, raw: R.decodeRaw(state.deck[card]) }; });
-    if (!entries.length) return null;
-    state.model = R.buildModel(entries);
-    return state.model;
-  }
-  function nextUnregistered(after) {
-    var cards = Games.allCards(), from = after ? cards.indexOf(after) + 1 : 0;
-    for (var index = 0; index < cards.length; index++) {
-      var card = cards[(from + index) % cards.length];
-      if (!state.deck[card]) return card;
-    }
-    return null;
-  }
-  function register(zs, samples, found) {
-    zs.status = 'done';
-    if (!found || !state.deckCard) { Live.toast('找不到牌，請拿開再放一次。', 'bad'); return; }
-    var card = state.deckCard;
-    state.deck[card] = R.encodeRaw(R.averageRaw(samples));
-    state.model = null;
-    if (!Live.store.set('tdl-deck', state.deck)) Live.toast('這台裝置存不下牌組資料。', 'bad');
-    state.lastRegistered = card;
-    state.deckCard = nextUnregistered(card);
-    Live.toast('已登記 ' + Games.cardLabel(card) + '，拿開後放下一張。', 'good');
-    renderDeck();
-  }
-  function renderDeck() {
-    var cards = Games.allCards(), count = Object.keys(state.deck).length;
-    if (!state.deckCard || state.deck[state.deckCard]) state.deckCard = nextUnregistered(null);
-    $('deckCount').textContent = '已登記 ' + count + ' / 52';
-    $('deckGrid').innerHTML = cards.map(function (card) {
-      return '<span class="' + (Games.isRed(card) ? 'red ' : '') + (state.deck[card] ? 'done ' : '') + (card === state.deckCard ? 'now' : '') + '">' + Games.cardLabel(card) + '</span>';
-    }).join('');
-    $('deckPrompt').textContent = !state.empty ? '先清空桌面按「拍空桌」，才能登記牌組。' : state.deckCard ? '請把 ' + Games.cardLabel(state.deckCard) + ' 放進任一牌位' : '52 張都登記好了，可以回到「運行」。';
-  }
-  $('deckSkip').addEventListener('click', function () { state.deckCard = nextUnregistered(state.deckCard); renderDeck(); });
-  $('deckRedo').addEventListener('click', function () {
-    if (!state.lastRegistered) return;
-    delete state.deck[state.lastRegistered]; state.model = null; Live.store.set('tdl-deck', state.deck);
-    state.deckCard = state.lastRegistered; state.lastRegistered = null; renderDeck();
-  });
-  var clearArmed = 0;
-  $('deckClear').addEventListener('click', function () {
-    if (Date.now() < clearArmed) { state.deck = {}; state.model = null; Live.store.set('tdl-deck', {}); clearArmed = 0; $('deckClear').textContent = '清除全部'; renderDeck(); return; }
-    clearArmed = Date.now() + 3000; $('deckClear').textContent = '再按一次清除';
-    setTimeout(function () { $('deckClear').textContent = '清除全部'; }, 3000);
-  });
 
   /* ---------------- modes ---------------- */
   $('modeTabs').querySelectorAll('button').forEach(function (button) {
     button.addEventListener('click', function () {
       state.mode = button.dataset.mode;
       $('modeTabs').querySelectorAll('button').forEach(function (other) { other.classList.toggle('on', other === button); });
-      $('panelRun').hidden = state.mode !== 'run'; $('panelZones').hidden = state.mode !== 'zones'; $('panelDeck').hidden = state.mode !== 'deck';
-      resetZoneStates(); renderDeck();
+      $('panelRun').hidden = state.mode !== 'run'; $('panelZones').hidden = state.mode !== 'zones';
+      resetZoneStates();
     });
   });
   $('resetZones').addEventListener('click', function () {
@@ -345,11 +287,10 @@
     saveZones();
   });
 
-  // What stops reading right now, in the order it has to be fixed. Shown above the positions.
+  // What stops reading right now. Shown above the positions.
   function blocker() {
     if (!state.source) return '還沒開始相機。';
-    if (!state.empty) return '還沒拍空桌，讀牌尚未啟動：清空桌面後按「拍空桌」。';
-    if (state.mode !== 'run') return '目前在「' + (state.mode === 'deck' ? '登記牌組' : '調整牌位') + '」，回到「運行」才會把牌送給主持台。';
+    if (state.mode !== 'run') return '目前在「調整牌位」，回到「運行」才會讀牌。';
     if (!link || !link.online) return '沒有連上伺服器，讀到的牌不會送出。';
     if (state.table && state.table.phase !== 'dealing') return '主持台的「' + game().name + '」還沒到出牌階段（目前：' + Live.PHASE[state.table.phase] + '）。讀到的牌會顯示在這裡，但要到出牌階段才會送出；主持台要選同一款遊戲。';
     return '';
@@ -358,18 +299,15 @@
   function buildReadouts() {
     var stop = blocker();
     $('blocker').hidden = !stop; $('blocker').textContent = stop;
-    var count = Object.keys(state.deck).length;
-    $('deckNote').hidden = !!stop || deckCovered();
-    $('deckNote').textContent = count ? '牌組只登記了 ' + count + ' / 52 張，讀到的牌只當建議，由主持台確認。登記完整後會自動讀牌。' : '沒有登記牌組：每張牌都由主持台手選。到「登記牌組」登記 52 張後，就會自動讀牌。';
     $('readouts').innerHTML = game().zones.map(function (zone) {
       var zs = state.zoneState[zone.id] || {};
       var card = zs.status === 'card' && zs.result ? zs.result.card : null;
-      var text = zs.status === 'card' ? '認到 ' + Math.round(zs.result.score * 100) + '%' : zs.status === 'unsure' ? '認不出來' : zs.status === 'busy' ? '偵測中' : '空';
+      var text = zs.status === 'card' ? '讀到 ' + Math.round(zs.result.score * 100) + '%' : zs.status === 'unsure' ? '認不出來' : zs.status === 'busy' ? '偵測中' : '空';
       var numbers = [];
       if (zs.coverage != null) numbers.push('覆蓋 ' + Math.round(zs.coverage * 100) + '%');
       if (zs.moving != null && zs.moving < 90) numbers.push('晃動 ' + zs.moving.toFixed(0));
-      if (zs.height) numbers.push('牌高 ' + zs.height + 'px' + (zs.lightTable ? '（淺色桌面模式）' : ''));
-      if (zs.result) numbers.push('最像 ' + Games.cardLabel(zs.result.card) + ' ' + zs.result.score.toFixed(2) + '／差距 ' + zs.result.margin.toFixed(2));
+      if (zs.height) numbers.push('牌高 ' + zs.height + 'px');
+      if (zs.result && zs.result.card) numbers.push('最像 ' + Games.cardLabel(zs.result.card) + ' ' + zs.result.score.toFixed(2) + '／差距 ' + zs.result.margin.toFixed(2));
       return '<div class="readout ' + zone.side + '">' + Live.cardHtml(card) + '<div style="min-width:0"><div class="label">' + Live.escape(zone.label) + '　' + text + '</div>' +
         '<div class="diag">' + numbers.join('・') + '</div>' + (zs.why && zs.status !== 'card' ? '<div class="why">' + Live.escape(zs.why) + '</div>' : '') + '</div></div>';
     }).join('');
@@ -430,43 +368,17 @@
   overlay.addEventListener('pointerup', function () { if (state.drag) { state.drag = null; saveZones(); } });
   overlay.addEventListener('pointercancel', function () { state.drag = null; });
 
-  /* ---------------- demo: simulated camera, quick registration, automatic dealing ---------------- */
-  if (Live.demo) { $('fakeCamera').hidden = false; $('quickDeck').hidden = false; }
+  /* ---------------- demo: simulated camera and automatic dealing ---------------- */
+  if (Live.demo) $('fakeCamera').hidden = false;
   function startFake() {
-    state.fake = DemoCamera.source(1280, 720);
-    useSource(state.fake.canvas, 1280, 720);
+    state.fake = DemoCamera.source(1920, 1080);
+    useSource(state.fake.canvas, 1920, 1080);
     $('fakeCamera').disabled = true;
     $('autoDealLabel').hidden = false;
   }
   $('fakeCamera').addEventListener('click', startFake);
   function cardHeightFor(zoneId) { var rect = rectOf(zoneId); return Math.min(rect.h * 0.78, rect.w * 0.78 / 0.716); }
   function zoneCentre(zoneId) { var rect = rectOf(zoneId); return { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 }; }
-
-  // Builds reference images straight from the simulated cards (three noisy frames each), so the
-  // demo does not need 52 manual placements. A real deck still goes through the normal flow.
-  function quickRegister(done) {
-    if (!state.width) { Live.toast('請先開始相機或模擬攝影機。', 'bad'); return; }
-    var camera = DemoCamera.source(state.width, state.height, { still: true });
-    var empty = camera.place([]), zoneId = game().zones[0].id, rect = rectOf(zoneId), centre = zoneCentre(zoneId), height = cardHeightFor(zoneId);
-    var cards = Games.allCards(), index = 0;
-    $('quickDeck').disabled = true;
-    (function next() {
-      if (index >= cards.length) {
-        camera.stop(); state.model = null; Live.store.set('tdl-deck', state.deck); $('quickDeck').disabled = false;
-        renderDeck(); Live.toast('52 張模擬牌已登記。', 'good'); if (done) done(); return;
-      }
-      var card = cards[index++], raws = [];
-      for (var shot = 0; shot < 3; shot++) {
-        var frame = camera.place([{ card: card, h: height, x: centre.x + (Math.random() - 0.5) * 8, y: centre.y + (Math.random() - 0.5) * 8, angle: (Math.random() - 0.5) * 0.04 }]);
-        var found = R.locate(frame, empty, rect);
-        if (found) raws.push(R.describeRaw(frame, found));
-      }
-      if (raws.length) state.deck[card] = R.encodeRaw(R.averageRaw(raws));
-      $('deckCount').textContent = '登記中 ' + index + ' / 52';
-      setTimeout(next, 0);
-    })();
-  }
-  $('quickDeck').addEventListener('click', function () { quickRegister(); });
 
   // When the host's table asks for a card, put a random unused card on that position.
   state.dealt = {}; state.dealPending = false; state.shoe = [];
@@ -493,15 +405,6 @@
     }, 900);
   }
   function shuffle(list) { for (var index = list.length - 1; index > 0; index--) { var other = Math.floor(Math.random() * (index + 1)), keep = list[index]; list[index] = list[other]; list[other] = keep; } return list; }
-
-  // demo.html opens the reader with ?autostart: simulated camera, empty table, deck, then run.
-  function autoStart() {
-    startFake();
-    setTimeout(function () {
-      $('captureEmpty').click();
-      if (Object.keys(state.deck).length < 52) { state.deck = {}; quickRegister(); }
-    }, 700);
-  }
 
   loadTable();
   window.__readerState = state;   // read by the automated test
