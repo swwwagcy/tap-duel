@@ -1,0 +1,69 @@
+/* Tap Duel Live: one dark look shared by the viewer page, the host console and the reader. */
+:root {
+  color-scheme: dark;
+  --bg: #0f1729;
+  --surface: #19233b;
+  --surface-2: #222f4d;
+  --line: #33415f;
+  --fg: #eef2fa;
+  --muted: #98a5c2;
+  --red: #e9584c;
+  --blue: #4f8ff7;
+  --tie: #a98bfa;
+  --wait: #f2b23e;
+  --go: #37c58a;
+  --card: #f7f5ef;
+  --card-ink: #161b26;
+  --card-red: #c8322b;
+  --font-body: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+  --font-num: "Space Grotesk", "Noto Sans TC", system-ui, sans-serif;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+[hidden] { display: none !important; }
+body { background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 16px; line-height: 1.45; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+button { font: inherit; color: inherit; cursor: pointer; border: 2px solid var(--line); background: var(--surface-2); border-radius: 10px; min-height: 44px; padding: 6px 12px; }
+button:disabled { opacity: .38; cursor: default; }
+button.primary { background: var(--fg); color: var(--bg); border-color: var(--fg); font-weight: 700; }
+button.danger { color: var(--red); border-color: var(--red); }
+button.danger.armed { background: var(--red); color: #fff; }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid var(--fg); outline-offset: 2px; }
+input, select { font: inherit; color: var(--fg); background: var(--surface-2); border: 2px solid var(--line); border-radius: 8px; min-height: 44px; padding: 4px 10px; }
+.num { font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+.muted { color: var(--muted); }
+.panel { background: var(--surface); border-radius: 14px; padding: 12px; min-width: 0; }
+.tabs { display: flex; gap: 6px; }
+.tabs button { flex: 1; }
+.tabs button.on { background: var(--fg); color: var(--bg); border-color: var(--fg); font-weight: 700; }
+
+.cardface { display: inline-flex; flex-direction: column; align-items: center; justify-content: center; width: 2.6em; aspect-ratio: 5 / 7; border-radius: 6px; background: var(--card); color: var(--card-ink); font-family: var(--font-num); line-height: 1; vertical-align: middle; }
+.cardface b { font-size: 1.05em; }
+.cardface i { font-style: normal; font-size: 1em; }
+.cardface.red { color: var(--card-red); }
+.cardface.empty { background: transparent; border: 2px dashed var(--line); }
+
+.phase { display: inline-flex; align-items: center; gap: 8px; padding: 4px 12px; border-radius: 999px; font-weight: 700; background: var(--surface-2); border: 2px solid var(--line); }
+.phase[data-phase="open"] { border-color: var(--fg); }
+.phase[data-phase="closed"] { background: var(--wait); border-color: var(--wait); color: #1d1503; }
+.phase[data-phase="dealing"] { background: var(--go); border-color: var(--go); color: #04170f; }
+.phase[data-phase="result"] { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+.phase[data-phase="void"] { color: var(--muted); }
+
+.road { display: flex; flex-wrap: wrap; gap: 4px; }
+.road span { width: 18px; height: 18px; border-radius: 50%; font-size: 11px; display: inline-flex; align-items: center; justify-content: center; font-weight: 700; color: #fff; }
+.road .R { background: var(--red); } .road .U { background: var(--blue); } .road .T { background: var(--tie); }
+
+.toast { opacity: 0; pointer-events: none; position: fixed; left: 50%; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%) translateY(150%); max-width: calc(100% - 32px); background: var(--surface); border: 2px solid var(--wait); color: var(--fg); padding: 10px 16px; border-radius: 12px; font-weight: 500; transition: transform .2s, opacity .2s; z-index: 50; }
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+.toast.bad { border-color: var(--red); }
+.toast.good { border-color: var(--go); }
+
+.keygate { position: fixed; inset: 0; background: var(--bg); display: flex; align-items: center; justify-content: center; z-index: 60; padding: 16px; }
+.keygate form { width: min(100%, 360px); display: flex; flex-direction: column; gap: 12px; }
+.keygate h2 { margin: 0; }
+.keygate p { margin: 0; color: var(--muted); }
+.keygate .bad { color: var(--red); }
+
+.offline { position: fixed; top: env(safe-area-inset-top, 0px); left: 0; right: 0; background: var(--wait); color: #1d1503; text-align: center; font-weight: 700; padding: 4px; z-index: 40; }
+
+@media (prefers-reduced-motion: reduce) { .toast { transition: none; } }

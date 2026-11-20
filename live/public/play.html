@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Tap Duel Live</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  body { padding-bottom: env(safe-area-inset-bottom, 0px); }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 10px max(12px, env(safe-area-inset-right, 0px)) 24px max(12px, env(safe-area-inset-left, 0px)); display: flex; flex-direction: column; gap: 10px; }
+  .bar { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; }
+  .bar .who { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40vw; }
+  .bar .points { font-size: 22px; font-weight: 700; text-align: right; }
+  .bar .points small { font-size: 13px; color: var(--muted); font-weight: 400; margin-left: 4px; }
+  .rename { display: flex; gap: 8px; }
+  .rename input { flex: 1; min-width: 0; }
+  .stage { position: relative; aspect-ratio: 16 / 9; background: #000; border-radius: 14px; overflow: hidden; }
+  .stage img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .noframe { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--muted); text-align: center; padding: 16px; }
+  .overlay { position: absolute; left: 8px; right: 8px; top: 8px; display: flex; gap: 8px; align-items: center; }
+  .overlay .count { margin-left: auto; font-size: 34px; font-weight: 700; text-shadow: 0 2px 8px #000; }
+  .overlay .round { position: absolute; left: 0; top: 40px; font-size: 12px; color: #fff; text-shadow: 0 1px 4px #000; }
+  .hands { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .hand { min-width: 0; background: var(--surface); border-radius: 14px; padding: 10px; border: 3px solid transparent; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  .hand h3 { margin: 0; font-size: 16px; }
+  .hand.red h3 { color: var(--red); } .hand.blue h3 { color: var(--blue); }
+  .hand.win { border-color: var(--fg); }
+  .hand .cards { display: flex; gap: 6px; font-size: clamp(13px, 4.2vw, 20px); }
+  .hand .total { font-size: 14px; color: var(--muted); min-height: 20px; }
+  .banner { min-height: 0; border-radius: 12px; font-weight: 700; text-align: center; }
+  .banner.show { padding: 10px; background: var(--surface-2); border: 2px solid var(--fg); }
+  .spots { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
+  .spot { grid-column: span 2; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 84px; border-radius: 12px; position: relative; }
+  .spot.wide { grid-column: span 3; min-height: 64px; }
+  .spot.red { border-color: var(--red); } .spot.blue { border-color: var(--blue); } .spot.tie { border-color: var(--tie); }
+  .spot .label { font-weight: 700; font-size: 18px; }
+  .spot .odds { font-size: 13px; color: var(--muted); }
+  .spot .mine { font-size: 15px; font-weight: 700; color: var(--wait); min-height: 18px; }
+  .spot .all { position: absolute; right: 8px; bottom: 4px; font-size: 11px; color: var(--muted); }
+  .spot.won { background: var(--fg); color: var(--bg); }
+  .spot.won .odds, .spot.won .all { color: var(--bg); }
+  .chips { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .chip { width: 52px; height: 52px; border-radius: 50%; padding: 0; font-weight: 700; font-family: var(--font-num); font-size: 14px; }
+  .chip.on { background: var(--wait); color: #1d1503; border-color: var(--wait); }
+  .chips .grow { flex: 1; }
+  h3.title { margin: 0 0 8px; font-size: 15px; }
+  details summary { cursor: pointer; font-weight: 700; }
+  details ul { margin: 8px 0 0; padding-left: 20px; color: var(--muted); }
+  details p { margin: 8px 0 0; color: var(--muted); }
+  .chips > div { flex-wrap: wrap; }
+  @media (max-width: 480px) {
+    .bar { grid-template-columns: minmax(0, 1fr) auto; }
+    .bar .who { max-width: none; }
+    .bar .tabs { grid-column: 1 / -1; grid-row: 2; }
+    .chip { width: 48px; height: 48px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="bar">
+    <button id="nameBtn" class="who" type="button">觀眾</button>
+    <div class="tabs" id="tableTabs"></div>
+    <div class="points"><span class="num" id="points">—</span><small>點</small></div>
+  </header>
+  <form class="rename" id="renameForm" hidden><input id="nameInput" maxlength="16" placeholder="輸入暱稱" aria-label="暱稱"><button class="primary" type="submit">儲存</button></form>
+
+  <section class="stage">
+    <img id="live" alt="牌桌即時畫面" hidden>
+    <div class="noframe" id="noFrame">牌桌畫面尚未連線</div>
+    <div class="overlay"><span class="phase" id="phase" data-phase="idle">待開始</span><span class="round" id="round"></span><span class="count num" id="count"></span></div>
+  </section>
+
+  <section class="hands" id="hands"></section>
+  <div class="banner" id="banner" role="status" aria-live="polite"></div>
+  <section class="spots" id="spots"></section>
+
+  <section class="chips">
+    <div id="chips" style="display:flex;gap:6px"></div>
+    <span class="grow"></span>
+    <button id="undo" type="button">撤回上一次</button>
+    <button id="refill" type="button" hidden>補充點數</button>
+  </section>
+
+  <section class="panel"><h3 class="title">最近結果</h3><div class="road" id="road"></div></section>
+  <details class="panel"><summary>玩法說明</summary><p id="summary"></p><ul id="rules"></ul><p>點數只是示範用，不能兌換。</p></details>
+</div>
+<div id="toast" class="toast" role="status"></div>
+<script src="games.js"></script>
+<script src="common.js"></script>
+<script src="play.js"></script>
+</body>
+</html>

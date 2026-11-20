@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Tap Duel Live 主持台</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  html, body { height: 100%; }
+  body { overflow: hidden; -webkit-user-select: none; user-select: none; }
+  .app { height: 100%; display: grid; grid-template-rows: auto minmax(0, 1fr) auto auto; gap: 8px; padding: calc(8px + env(safe-area-inset-top, 0px)) max(10px, env(safe-area-inset-right, 0px)) calc(8px + env(safe-area-inset-bottom, 0px)) max(10px, env(safe-area-inset-left, 0px)); }
+  .top { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 2fr) auto; gap: 8px; align-items: stretch; }
+  .roundbox { background: var(--surface); border-radius: 12px; padding: 4px 12px; display: flex; flex-direction: column; justify-content: center; min-width: 0; }
+  .roundbox small { color: var(--muted); font-size: 12px; }
+  .roundbox b { font-family: var(--font-num); font-size: clamp(16px, 2.6vw, 26px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .phasebox { border-radius: 12px; padding: 4px 14px; display: flex; align-items: center; justify-content: space-between; gap: 10px; background: var(--surface-2); border: 2px solid var(--line); min-width: 0; }
+  .phasebox[data-phase="open"] { border-color: var(--fg); }
+  .phasebox[data-phase="closed"] { background: var(--wait); border-color: var(--wait); color: #1d1503; }
+  .phasebox[data-phase="dealing"] { background: var(--go); border-color: var(--go); color: #04170f; }
+  .phasebox[data-phase="result"] { background: var(--fg); border-color: var(--fg); color: var(--bg); }
+  .phasebox .text { font-weight: 700; font-size: clamp(18px, 3.4vw, 32px); line-height: 1.15; min-width: 0; }
+  .phasebox .sub { display: block; font-size: 13px; font-weight: 500; opacity: .85; }
+  .phasebox .count { font-family: var(--font-num); font-weight: 700; font-size: clamp(28px, 5vw, 50px); }
+  .main { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 8px; min-height: 0; }
+  .board { background: var(--surface); border-radius: 14px; padding: 10px; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; gap: 8px; min-height: 0; }
+  .tabs button { min-height: 40px; }
+  .zones { display: grid; gap: 8px; min-height: 0; }
+  .zones.duel { grid-template-columns: 1fr 1fr; }
+  .zones.nine { grid-template-columns: repeat(3, 1fr); grid-template-rows: auto 1fr auto 1fr; }
+  .sidehead { grid-column: 1 / -1; font-weight: 700; font-size: 15px; display: flex; justify-content: space-between; }
+  .sidehead.red { color: var(--red); } .sidehead.blue { color: var(--blue); }
+  .zone { position: relative; border-radius: 12px; border: 3px solid var(--line); background: var(--surface-2); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; padding: 6px; min-height: 0; min-width: 0; overflow: hidden; }
+  .zone .name { font-size: 13px; color: var(--muted); }
+  .zone .cardface { font-size: clamp(18px, 3.4vmin, 34px); }
+  .zones.duel .cardface { font-size: clamp(26px, 7vmin, 64px); }
+  .zone:disabled { opacity: 1; cursor: default; }
+  .zone .tag { font-size: 12px; min-height: 16px; color: var(--muted); white-space: nowrap; }
+  .zone .shot { position: absolute; right: 4px; top: 4px; width: 34px; height: 46px; object-fit: cover; border-radius: 4px; border: 1px solid var(--line); }
+  .zone.next { border-color: var(--wait); }
+  .zone.unsure { border-color: var(--red); }
+  .zone.unsure .tag { color: var(--red); font-weight: 700; }
+  .zone.manual .tag { color: var(--wait); }
+  .zone.off { opacity: .45; }
+  .zone.red .name { color: var(--red); } .zone.blue .name { color: var(--blue); }
+  .guide { font-weight: 700; font-size: clamp(15px, 2.4vw, 20px); min-height: 26px; }
+  .guide.bad { color: var(--red); }
+  .side { display: grid; grid-template-rows: auto auto minmax(0, 1fr); gap: 8px; min-height: 0; }
+  .camera { position: relative; aspect-ratio: 16 / 9; background: #000; border-radius: 12px; overflow: hidden; }
+  .camera img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .camera .state { position: absolute; left: 0; right: 0; bottom: 0; padding: 4px 8px; font-size: 12px; background: rgba(0,0,0,.6); }
+  .camera .state.offline { color: var(--wait); }
+  .totals { background: var(--surface); border-radius: 12px; padding: 8px 10px; font-size: 14px; }
+  .totals .row { display: flex; justify-content: space-between; gap: 8px; }
+  .notes { background: var(--surface); border-radius: 12px; padding: 8px 10px; font-size: 13px; overflow-y: auto; min-height: 0; }
+  .notes p { margin: 0 0 4px; }
+  .notes .warn { color: var(--wait); }
+  .actions { display: grid; grid-template-columns: 2fr 1fr auto; gap: 8px; }
+  .actions button { min-height: 58px; font-size: 18px; font-weight: 700; }
+  .modal { position: fixed; inset: 0; background: rgba(5,10,20,.75); display: flex; align-items: center; justify-content: center; z-index: 30; padding: 16px; }
+  .modal .sheet { background: var(--surface); border-radius: 16px; padding: 14px; width: min(100%, 560px); max-height: 100%; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+  .modal h2 { margin: 0; font-size: 19px; }
+  .suits, .ranks, .quick { display: grid; gap: 6px; }
+  .suits { grid-template-columns: repeat(4, 1fr); }
+  .ranks { grid-template-columns: repeat(7, 1fr); }
+  .quick { grid-template-columns: repeat(3, 1fr); }
+  .suits button { background: var(--card); color: var(--card-ink); border-color: var(--card); font-size: 28px; min-height: 54px; }
+  .suits button.red { color: var(--card-red); }
+  .suits button.on, .ranks button.on { outline: 4px solid var(--wait); }
+  .ranks button { font-family: var(--font-num); font-weight: 700; font-size: 20px; min-height: 50px; padding: 0; }
+  .row2 { display: flex; gap: 8px; flex-wrap: wrap; }
+  .drawer { position: fixed; inset: 0; background: var(--bg); z-index: 20; overflow-y: auto; padding: calc(12px + env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) calc(24px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); -webkit-user-select: text; user-select: text; }
+  .drawer .head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+  .drawer h2 { margin: 0; }
+  .drawer .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; align-items: start; }
+  .field { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 0; border-top: 1px solid var(--line); }
+  .field:first-of-type { border-top: 0; }
+  .field input[type="number"] { width: 90px; text-align: center; }
+  .field input[type="checkbox"] { width: 26px; height: 26px; }
+  .hist { border-top: 1px solid var(--line); padding: 8px 0; font-size: 14px; }
+  .hist .cards { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+  .hist .c { display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 11px; color: var(--muted); }
+  .hist .c img { width: 40px; height: 54px; object-fit: cover; border-radius: 4px; }
+  @media (max-aspect-ratio: 1/1) {
+    .main { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1.5fr) auto; }
+    .side { grid-template-columns: 1fr 1fr; grid-template-rows: auto; }
+    .notes { display: none; }
+  }
+  @media (max-width: 560px) { .top { grid-template-columns: 1fr auto; } .phasebox { grid-column: 1 / -1; grid-row: 2; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <div class="roundbox"><small>回合</small><b id="roundNo">—</b></div>
+    <div class="phasebox" id="phaseBox" data-phase="idle"><span class="text"><span id="phaseText">待開始</span><span class="sub" id="phaseSub"></span></span><span class="count" id="count"></span></div>
+    <button id="openDrawer" type="button">設定</button>
+  </header>
+  <div class="main">
+    <section class="board">
+      <div class="tabs" id="tableTabs"></div>
+      <div class="zones" id="zones"></div>
+      <div class="guide" id="guide"></div>
+    </section>
+    <section class="side">
+      <div class="camera"><img id="live" alt="讀牌器畫面" hidden><div class="state offline" id="readerState">讀牌器未連線（可手動選牌）</div></div>
+      <div class="totals" id="totals"></div>
+      <div class="notes" id="notes"><p class="muted">提醒會顯示在這裡。</p></div>
+    </section>
+  </div>
+  <div class="actions">
+    <button class="primary" id="mainButton" type="button">開始新回合</button>
+    <button class="danger" id="voidButton" type="button" disabled>取消回合</button>
+    <button id="helpButton" type="button" aria-label="快捷鍵說明">?</button>
+  </div>
+  <div id="toast" class="toast" role="status"></div>
+</div>
+
+<div class="modal" id="picker" hidden>
+  <div class="sheet">
+    <h2 id="pickerTitle">選牌</h2>
+    <div class="quick" id="pickerQuick"></div>
+    <div class="suits" id="pickerSuits"></div>
+    <div class="ranks" id="pickerRanks"></div>
+    <div class="row2"><button id="pickerClear" type="button">清除這張</button><span style="flex:1"></span><button id="pickerClose" type="button">關閉</button></div>
+  </div>
+</div>
+
+<div class="drawer" id="drawer" hidden>
+  <div class="head"><h2>設定與紀錄</h2><button id="closeDrawer" class="primary" type="button">回到主持台</button></div>
+  <div class="grid">
+    <div class="panel">
+      <h3 style="margin-top:0">本桌設定</h3>
+      <label class="field" for="setOpen"><span>選擇秒數</span><input id="setOpen" type="number" min="5" max="120" inputmode="numeric"></label>
+      <label class="field" for="setWait"><span>截止後等待秒數</span><input id="setWait" type="number" min="0" max="30" inputmode="numeric"></label>
+      <label class="field" for="setAuto"><span>結束後自動開下一回合</span><input id="setAuto" type="checkbox"></label>
+      <p class="muted" style="font-size:14px">等待秒數要大於直播的延遲，主持人在等待結束、畫面變綠之後才翻牌。改動從下一回合生效。</p>
+      <p class="muted" style="font-size:14px">快捷鍵：Enter、PageDown 或右方向鍵＝主按鈕（藍牙簡報器可用）。</p>
+    </div>
+    <div class="panel"><h3 style="margin-top:0">最近的回合</h3><div id="history"><p class="muted">還沒有結束的回合。</p></div></div>
+  </div>
+</div>
+<script src="games.js"></script>
+<script src="common.js"></script>
+<script src="host.js"></script>
+</body>
+</html>

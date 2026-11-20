@@ -1,0 +1,15 @@
+{
+  "name": "tap-duel-live",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Tap Duel Live: viewer page, host console and camera card reader on one small server.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test/rules.test.js"
+  },
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}
