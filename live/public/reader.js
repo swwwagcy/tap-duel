@@ -15,15 +15,26 @@
   var RETRY_TICKS = 10;            // a face-down or unread card is looked at again this often
   var FRAME_SEND_MS = 700;
   var WORK_MAX_WIDTH = 1920;
+  var RAW_MAX_WIDTH = 2560;        // with a slanted camera, more of the camera's detail is kept before straightening
+  var DEFAULT_QUAD = [[0.12, 0.14], [0.88, 0.14], [0.94, 0.88], [0.06, 0.88]];
 
   var state = {
     tableId: ((/[?&]table=(\w+)/.exec(location.search) || [])[1] || Live.store.get('tdl-reader-table', 'duel')), mode: 'run',
     source: null, width: 0, height: 0, frame: null,
     zones: {}, zoneState: {}, table: null,
     lastSize: 0, ticks: [], frameSentAt: 0, statusSentAt: 0, drag: null,
-    zoom: Live.store.get('tdl-zoom', 1), track: null, lens: null, lastPhase: null
+    zoom: Live.store.get('tdl-zoom', 1), track: null, lens: null, lastPhase: null,
+    // Table calibration for a camera that is not straight above: the four corners of a rectangle
+    // on the table (top-left, top-right, bottom-right, bottom-left), as fractions of the camera
+    // picture. null = the camera looks straight down and the picture is used as it is.
+    quad: validQuad(Live.store.get('tdl-quad', null)), quadDraft: null, sourceWidth: 0, sourceHeight: 0, rawWidth: 0, rawHeight: 0, flat: null
   };
   var work = $('work'), workContext = null, overlay = $('overlay');
+  var raw = document.createElement('canvas'), rawContext = null;
+  function validQuad(quad) {
+    var ok = Array.isArray(quad) && quad.length === 4 && quad.every(function (point) { return Array.isArray(point) && point.length === 2 && isFinite(point[0]) && isFinite(point[1]); });
+    return ok && Perspective.usable(quad) ? quad : null;
+  }
   var link = null;
 
   /* ---------------- connection ---------------- */
@@ -149,12 +160,10 @@
     }).catch(function (error) { Live.toast('無法開啟相機：' + error.name + '。請允許相機權限。', 'bad'); });
   });
   function useSource(source, sourceWidth, sourceHeight) {
-    state.source = source;
-    var scale = Math.min(1, WORK_MAX_WIDTH / sourceWidth);
-    state.width = Math.round(sourceWidth * scale); state.height = Math.round(sourceHeight * scale);
-    work.width = state.width; work.height = state.height;
+    state.source = source; state.sourceWidth = sourceWidth; state.sourceHeight = sourceHeight;
     workContext = work.getContext('2d', { willReadFrequently: true });
-    $('stage').style.aspectRatio = state.width + ' / ' + state.height;
+    rawContext = raw.getContext('2d', { willReadFrequently: true });
+    applyGeometry();
     $('hint').hidden = true;
     $('startCamera').textContent = '相機運行中'; $('startCamera').disabled = true;
     CardOCR.build();
@@ -164,15 +173,52 @@
     tick();
   }
 
+  /* ---------------- geometry: straight above, or straightened from four corners ---------------- */
+  function straightening() { return !!state.quad && state.mode !== 'quad'; }
+  function quadPixels(quad) { return quad.map(function (point) { return [point[0] * state.rawWidth, point[1] * state.rawHeight]; }); }
+  // Sets the size of the picture that is read. Straight above: the camera picture, scaled down
+  // if it is very large. Calibrated: the table as seen from above, worked out from the corners.
+  function applyGeometry() {
+    if (!state.sourceWidth) return;
+    var limit = straightening() ? RAW_MAX_WIDTH : WORK_MAX_WIDTH, scale = Math.min(1, limit / state.sourceWidth);
+    state.rawWidth = Math.round(state.sourceWidth * scale); state.rawHeight = Math.round(state.sourceHeight * scale);
+    if (straightening()) {
+      var size = Perspective.outputSize(quadPixels(state.quad), state.rawWidth, state.rawHeight, WORK_MAX_WIDTH, WORK_MAX_WIDTH);
+      raw.width = state.rawWidth; raw.height = state.rawHeight;
+      state.width = size.width; state.height = size.height;
+      state.flat = workContext.createImageData(size.width, size.height);
+    } else {
+      state.width = state.rawWidth; state.height = state.rawHeight; state.flat = null;
+    }
+    work.width = state.width; work.height = state.height;
+    $('stage').style.aspectRatio = state.width + ' / ' + state.height;
+    state.frame = null;
+    resetZoneStates();
+    showQuadState();
+  }
+  function showQuadState() {
+    $('quadState').textContent = state.quad ? '目前：已校正，讀的是拉正後的桌面。' : '目前：未校正，直接使用相機畫面（鏡頭在正上方時用這個）。';
+    $('quadOff').disabled = !state.quad;
+  }
+  function grabFrame() {
+    if (!straightening()) {
+      drawSource(workContext, state.width, state.height);
+      return workContext.getImageData(0, 0, state.width, state.height);
+    }
+    drawSource(rawContext, state.rawWidth, state.rawHeight);
+    Perspective.warp(rawContext.getImageData(0, 0, state.rawWidth, state.rawHeight), quadPixels(state.quad), state.flat);
+    workContext.putImageData(state.flat, 0, 0);
+    return state.flat;
+  }
+
   /* ---------------- main loop ---------------- */
   function tick() {
     var started = performance.now();
     if (state.source) {
       // One bad frame (a camera hiccup, a stream that briefly stops) must not stop the loop.
       try {
-        drawSource();
-        state.frame = workContext.getImageData(0, 0, state.width, state.height);
-        process();
+        state.frame = grabFrame();
+        if (state.mode !== 'quad') process();
         drawOverlay();
         sendFrame();
         sendStatus();
@@ -203,14 +249,17 @@
     $('zoomOut').disabled = state.zoom <= min; $('zoomIn').disabled = state.zoom >= max;
     if (state.lens) state.track.applyConstraints({ advanced: [{ zoom: state.zoom }] }).catch(function () { state.lens = null; applyZoom(Math.max(1, state.zoom)); });
     resetZoneStates();
+    // The corners were marked on the picture at the old zoom.
+    if (state.quad && state.zoomSeen != null && state.zoomSeen !== state.zoom && state.mode !== 'quad') Live.toast('縮放改變了，請到「桌面校正」重新對準四個角。', 'bad');
+    state.zoomSeen = state.zoom;
   }
   $('zoomIn').addEventListener('click', function () { applyZoom(state.zoom + (state.zoom < 2 ? 0.1 : 0.2)); });
   $('zoomOut').addEventListener('click', function () { applyZoom(state.zoom - (state.zoom <= 2 ? 0.1 : 0.2)); });
-  function drawSource() {
+  function drawSource(context, outWidth, outHeight) {
     var source = state.source, width = source.videoWidth || source.width, height = source.videoHeight || source.height;
     var crop = state.lens ? 1 : Math.max(1, state.zoom);
     var cropWidth = width / crop, cropHeight = height / crop;
-    workContext.drawImage(source, (width - cropWidth) / 2, (height - cropHeight) / 2, cropWidth, cropHeight, 0, 0, state.width, state.height);
+    context.drawImage(source, (width - cropWidth) / 2, (height - cropHeight) / 2, cropWidth, cropHeight, 0, 0, outWidth, outHeight);
   }
 
   function process() {
@@ -325,7 +374,9 @@
     button.addEventListener('click', function () {
       state.mode = button.dataset.mode;
       $('modeTabs').querySelectorAll('button').forEach(function (other) { other.classList.toggle('on', other === button); });
-      $('panelRun').hidden = state.mode !== 'run'; $('panelZones').hidden = state.mode !== 'zones';
+      $('panelRun').hidden = state.mode !== 'run'; $('panelZones').hidden = state.mode !== 'zones'; $('panelQuad').hidden = state.mode !== 'quad';
+      state.quadDraft = state.mode === 'quad' ? (state.quad || DEFAULT_QUAD).map(function (point) { return point.slice(); }) : null;
+      applyGeometry();
       resetZoneStates();
     });
   });
@@ -338,7 +389,7 @@
   // What stops reading right now. Shown above the positions.
   function blocker() {
     if (!state.source) return '還沒開始相機。';
-    if (state.mode !== 'run') return '目前在「調整牌位」，回到「運行」才會讀牌。';
+    if (state.mode !== 'run') return '目前在「' + (state.mode === 'quad' ? '桌面校正' : '調整牌位') + '」，回到「運行」才會讀牌。';
     if (!link || !link.online) return '沒有連上伺服器，讀到的牌不會送出。';
     if (state.table && state.table.phase !== 'dealing') return '主持台的「' + game().name + '」還沒到出牌階段（目前：' + Live.PHASE[state.table.phase] + '）。讀到的牌會顯示在這裡，但要到出牌階段才會送出；主持台要選同一款遊戲。';
     return '';
@@ -369,6 +420,7 @@
     var context = overlay.getContext('2d');
     context.clearRect(0, 0, width, height);
     if (state.source) context.drawImage(work, 0, 0, width, height);   // what is read is what is shown, zoom included
+    if (state.mode === 'quad') { drawQuad(context, width, height, ratio); return; }
     var next = state.table && state.table.phase === 'dealing' ? state.table.next : null;
     game().zones.forEach(function (zone) {
       var z = state.zones[zone.id], zs = state.zoneState[zone.id] || {};
@@ -386,11 +438,52 @@
       if (state.mode === 'zones') { context.fillStyle = '#f2b23e'; context.fillRect(x + w - 18 * ratio, y + h - 18 * ratio, 18 * ratio, 18 * ratio); }
     });
   }
+  // Calibration: the camera picture as it is, with the four corners to drag onto the corners of
+  // the table mat (or of any rectangle lying flat on the table).
+  var QUAD_NAMES = ['左上', '右上', '右下', '左下'];
+  function drawQuad(context, width, height, ratio) {
+    var quad = state.quadDraft || DEFAULT_QUAD, good = Perspective.usable(quad);
+    context.lineWidth = 3 * ratio; context.strokeStyle = good ? '#f2b23e' : '#e9584c';
+    context.fillStyle = 'rgba(242,178,62,0.12)';
+    context.beginPath();
+    quad.forEach(function (point, index) { if (index) context.lineTo(point[0] * width, point[1] * height); else context.moveTo(point[0] * width, point[1] * height); });
+    context.closePath(); context.fill(); context.stroke();
+    context.font = 'bold ' + Math.round(13 * ratio) + 'px sans-serif';
+    quad.forEach(function (point, index) {
+      var x = point[0] * width, y = point[1] * height;
+      context.beginPath(); context.arc(x, y, 13 * ratio, 0, Math.PI * 2); context.fillStyle = 'rgba(0,0,0,0.55)'; context.fill();
+      context.lineWidth = 3 * ratio; context.strokeStyle = '#f2b23e'; context.stroke();
+      context.beginPath(); context.arc(x, y, 2.5 * ratio, 0, Math.PI * 2); context.fillStyle = '#f2b23e'; context.fill();
+      context.fillStyle = '#fff'; context.fillText(QUAD_NAMES[index], x + (index === 1 || index === 2 ? -44 : 18) * ratio, y + (index < 2 ? 30 : -20) * ratio);
+    });
+  }
+  function saveQuad(quad) {
+    state.quad = quad ? quad.map(function (point) { return [Math.round(point[0] * 10000) / 10000, Math.round(point[1] * 10000) / 10000]; }) : null;
+    if (state.quad) Live.store.set('tdl-quad', state.quad); else Live.store.remove('tdl-quad');
+    state.zoomSeen = state.zoom;
+    showQuadState();
+  }
+  $('quadOff').addEventListener('click', function () {
+    saveQuad(null);
+    state.quadDraft = DEFAULT_QUAD.map(function (point) { return point.slice(); });
+    Live.toast('已取消校正，改回直接使用相機畫面。');
+  });
+
   function pointerAt(event) {
     var box = overlay.getBoundingClientRect();
     return { x: (event.clientX - box.left) / box.width, y: (event.clientY - box.top) / box.height, scaleX: 18 / box.width, scaleY: 18 / box.height };
   }
   overlay.addEventListener('pointerdown', function (event) {
+    if (state.mode === 'quad' && state.quadDraft) {
+      // The nearest corner, if the touch is reasonably close to it.
+      var box = overlay.getBoundingClientRect(), px = event.clientX - box.left, py = event.clientY - box.top, nearest = -1, best = 60;
+      state.quadDraft.forEach(function (point, index) { var gap = Math.hypot(point[0] * box.width - px, point[1] * box.height - py); if (gap < best) { best = gap; nearest = index; } });
+      if (nearest >= 0) {
+        state.drag = { corner: nearest, offsetX: state.quadDraft[nearest][0] - px / box.width, offsetY: state.quadDraft[nearest][1] - py / box.height, original: state.quadDraft.map(function (point) { return point.slice(); }) };
+        overlay.setPointerCapture(event.pointerId);
+      }
+      return;
+    }
     if (state.mode !== 'zones') return;
     var at = pointerAt(event), zones = game().zones.slice().reverse();
     for (var index = 0; index < zones.length; index++) {
@@ -406,6 +499,12 @@
   });
   overlay.addEventListener('pointermove', function (event) {
     if (!state.drag) return;
+    if (state.drag.corner != null) {
+      var here = pointerAt(event);
+      state.quadDraft[state.drag.corner] = [Math.max(0, Math.min(1, here.x + state.drag.offsetX)), Math.max(0, Math.min(1, here.y + state.drag.offsetY))];
+      if (!state.source) drawOverlay();
+      return;
+    }
     var at = pointerAt(event), drag = state.drag, z = drag.original.slice();
     var dx = at.x - drag.startX, dy = at.y - drag.startY;
     if (drag.resize) { z[2] = Math.max(0.04, Math.min(1 - z[0], z[2] + dx)); z[3] = Math.max(0.06, Math.min(1 - z[1], z[3] + dy)); }
@@ -413,7 +512,13 @@
     state.zones[drag.zone] = z.map(function (value) { return Math.round(value * 1000) / 1000; });
     if (!state.source) drawOverlay();
   });
-  overlay.addEventListener('pointerup', function () { if (state.drag) { state.drag = null; saveZones(); } });
+  overlay.addEventListener('pointerup', function () {
+    if (!state.drag) return;
+    var drag = state.drag; state.drag = null;
+    if (drag.corner == null) { saveZones(); return; }
+    if (Perspective.usable(state.quadDraft)) saveQuad(state.quadDraft);
+    else { state.quadDraft = drag.original; Live.toast('四個角要依序圍成一個不交叉的四邊形。', 'bad'); }
+  });
   overlay.addEventListener('pointercancel', function () { state.drag = null; });
 
   /* ---------------- demo: simulated camera and automatic dealing ---------------- */
@@ -461,5 +566,6 @@
   function shuffle(list) { for (var index = list.length - 1; index > 0; index--) { var other = Math.floor(Math.random() * (index + 1)), keep = list[index]; list[index] = list[other]; list[other] = keep; } return list; }
 
   loadTable();
+  showQuadState();
   window.__readerState = state;   // read by the automated test
 })();

@@ -218,6 +218,32 @@ const card = (socket, table, zone, value) => socket.send(JSON.stringify({ t: 'zo
   await until(async () => (await points()) === 10800, 'blue (3) loses to red (9): 10,900 - 100');
   step('viewer saw the live table picture; round settled (10,800)');
 
+  /* Table calibration for a slanted camera: drag a corner, the picture that is read changes
+     shape; a crossed outline is refused; switching it off restores the camera picture. */
+  const geometry = () => readerPage.evaluate(() => { const s = window.__readerState; return { width: s.width, height: s.height, quad: s.quad, frame: s.frame ? s.frame.width + 'x' + s.frame.height : null, mode: s.mode }; });
+  const dragCorner = async (from, to) => {
+    const box = await readerPage.locator('#overlay').boundingBox();
+    await readerPage.mouse.move(box.x + from[0] * box.width, box.y + from[1] * box.height);
+    await readerPage.mouse.down();
+    await readerPage.mouse.move(box.x + to[0] * box.width, box.y + to[1] * box.height, { steps: 4 });
+    await readerPage.mouse.up();
+  };
+  assert.deepStrictEqual([(await geometry()).width, (await geometry()).height, (await geometry()).quad], [1920, 1080, null], 'starts uncalibrated');
+  await readerPage.click('#modeTabs button[data-mode="quad"]');
+  await dragCorner([0.12, 0.14], [0.25, 0.3]);
+  let after = await geometry();
+  assert.ok(after.quad && Math.abs(after.quad[0][0] - 0.25) < 0.01 && Math.abs(after.quad[0][1] - 0.3) < 0.01, 'the dragged corner is stored');
+  await dragCorner([0.25, 0.3], [0.99, 0.99]);
+  assert.deepStrictEqual((await geometry()).quad, after.quad, 'a crossed outline is refused and the corners stay');
+  await readerPage.click('#modeTabs button[data-mode="run"]');
+  after = await until(async () => { const now = await geometry(); return now.frame && now.frame === now.width + 'x' + now.height && (now.width !== 1920 || now.height !== 1080) ? now : null; }, 'straightened frames flowing', 8000);
+  assert.ok(await readerPage.evaluate(() => JSON.parse(localStorage.getItem('tdl-quad')).length === 4), 'calibration is kept on the device');
+  await readerPage.click('#modeTabs button[data-mode="quad"]');
+  await readerPage.click('#quadOff');
+  await readerPage.click('#modeTabs button[data-mode="run"]');
+  await until(async () => { const now = await geometry(); return now.frame === '1920x1080' && !now.quad; }, 'camera picture restored', 8000);
+  step('table calibration: corner dragged (read picture became ' + after.width + 'x' + after.height + '), crossed outline refused, switched off again');
+
   await host.screenshot({ path: path.join(__dirname, 'shots', 'host.png') });
   await viewer.screenshot({ path: path.join(__dirname, 'shots', 'viewer.png'), fullPage: true });
   await readerPage.screenshot({ path: path.join(__dirname, 'shots', 'reader.png') });

@@ -41,6 +41,7 @@
     <div class="tabs" id="modeTabs">
       <button type="button" data-mode="run" class="on">運行</button>
       <button type="button" data-mode="zones">調整牌位</button>
+      <button type="button" data-mode="quad">桌面校正</button>
     </div>
   </div>
   <div class="status">
@@ -51,7 +52,7 @@
   <div class="stage" id="stage">
     <video id="video" playsinline muted></video>
     <canvas id="overlay"></canvas>
-    <div class="hint" id="hint">手機架在牌桌正上方 30–40 公分，鏡頭朝下，讓所有牌位都在畫面裡。</div>
+    <div class="hint" id="hint">手機架在牌桌正上方 30–40 公分，鏡頭朝下，讓所有牌位都在畫面裡。斜著拍也可以：開始相機後到「桌面校正」對準桌面的四個角。</div>
   </div>
 
   <!-- Camera controls stay visible in every mode. -->
@@ -72,6 +73,12 @@
     <p class="note">流程：開始相機 → 到「調整牌位」把框對準桌上的牌位（框比牌大一圈）→ 回到「運行」。不用登記牌組，也不用拍空桌。牌面要朝上、牌角的點數與花色要看得清楚；桌面顏色要和牌有明顯差別。</p>
   </section>
 
+  <section id="panelQuad" class="controls" hidden>
+    <p class="note" style="flex-basis:100%">鏡頭不在正上方時才需要。把四個圓點拖到桌墊的四個角（或任何平放在桌上的長方形的四個角），放開就生效。之後「調整牌位」與「運行」看到的是拉正後的桌面，牌位要重新對一次。手機被移動、或改了縮放，要回來重新對準。</p>
+    <p class="note" id="quadState" style="flex-basis:100%;font-weight:700"></p>
+    <button id="quadOff" type="button">取消校正（鏡頭在正上方）</button>
+  </section>
+
   <section id="panelZones" class="controls" hidden>
     <p class="note" style="flex-basis:100%">用上方的 －／＋ 縮放畫面，讓牌位佔滿畫面。拖曳框框移動位置，拖右下角的方塊調整大小。框要比牌大一圈，四邊都要看得到桌面，牌放歪也還在框內。</p>
     <button id="resetZones" type="button">恢復預設位置</button>
@@ -82,6 +89,7 @@
 <canvas id="work" hidden></canvas>
 <script src="games.js"></script>
 <script src="engine.js"></script>
+<script src="perspective.js"></script>
 <script src="recognizer.js"></script>
 <script src="ocr.js"></script>
 <script src="demo-camera.js"></script>
