@@ -28,7 +28,8 @@ const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; ch
 
 const server = http.createServer(function (request, response) {
   const url = new URL(request.url, 'http://localhost');
-  if (url.pathname === '/healthz') { response.writeHead(200, { 'Content-Type': 'text/plain' }); response.end('ok'); return; }
+  // Not /healthz: Cloud Run reserves paths ending in z and answers them itself with a Google 404.
+  if (url.pathname === '/health') { response.writeHead(200, { 'Content-Type': 'text/plain' }); response.end('ok'); return; }
   let file = url.pathname === '/' ? '/index.html' : url.pathname;
   file = path.normalize(file).replace(/^(\.\.[/\\])+/, '');
   const full = path.join(PUBLIC_DIR, file);

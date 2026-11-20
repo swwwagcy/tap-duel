@@ -100,7 +100,7 @@ Service URL: https://tap-duel-live-xxxxxxxxxx.asia-east1.run.app
 
 ```bash
 URL=$(gcloud run services describe tap-duel-live --region asia-east1 --format='value(status.url)')
-curl -s $URL/healthz     # 應該印出 ok
+curl -s $URL/health      # 應該印出 ok
 echo $URL
 ```
 
@@ -162,6 +162,8 @@ gcloud run services delete tap-duel-live --region asia-east1
 `--min-instances 1` 讓一個執行個體一直開著，即使沒人使用也會計費；讀牌器傳給觀眾的牌桌畫面也會產生對外流量。金額依用量而定，可以用 https://cloud.google.com/products/calculator 估算。只是要偶爾展示的話，展示完執行第 10 步刪除，下次再部署。
 
 ## 常見問題
+
+- **`/healthz` 回 Google 的 404 頁面**：Cloud Run 保留結尾是 `z` 的路徑，請求不會送到伺服器。檢查請用 `/health`（2026-11-20 之前部署的版本沒有 `/health`，可以用 `curl -s $URL/ | head -5`，看到 `<title>Tap Duel Live</title>` 就是正常）。
 
 - **觀眾很多時有人連不上**：確認部署時有 `--concurrency 1000`，到 Cloud Console 的服務詳細資料看「每個執行個體的並行要求上限」。
 - **主持台和觀眾看到的回合不一樣**：最大執行個體數不是 1，重新部署並確認 `--max-instances 1`。

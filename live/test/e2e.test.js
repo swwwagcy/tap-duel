@@ -37,7 +37,7 @@ const card = (socket, table, zone, value) => socket.send(JSON.stringify({ t: 'zo
 
 (async () => {
   server = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], { env: Object.assign({}, process.env, { PORT: String(PORT), STAFF_KEY: KEY }), stdio: ['ignore', 'pipe', 'inherit'] });
-  await until(async () => { try { return (await fetch(BASE + '/healthz')).ok; } catch (error) { return false; } }, 'server start');
+  await until(async () => { try { return (await fetch(BASE + '/health')).ok; } catch (error) { return false; } }, 'server start');
   step('server started');
 
   browser = await chromium.launch();
