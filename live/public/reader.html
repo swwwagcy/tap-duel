@@ -23,6 +23,9 @@
   .readout { background: var(--surface); border-radius: 10px; padding: 8px; display: flex; gap: 8px; align-items: center; font-size: 14px; }
   .readout .cardface { font-size: 18px; }
   .readout .label { font-weight: 700; }
+  .readout .diag { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .readout .why { font-size: 12px; color: var(--wait); }
+  .blocker { background: var(--wait); color: #1d1503; border-radius: 10px; padding: 8px 12px; font-weight: 700; }
   .readout.red .label { color: var(--red); } .readout.blue .label { color: var(--blue); }
   .prompt { font-size: 22px; font-weight: 700; }
   .deck { display: grid; grid-template-columns: repeat(13, 1fr); gap: 3px; font-size: 12px; }
@@ -66,6 +69,7 @@
   </section>
 
   <section id="panelRun" class="controls" style="flex-direction:column;align-items:stretch">
+    <div class="blocker" id="blocker" hidden></div>
     <div class="readouts" id="readouts"></div>
     <p class="note">流程：調整牌位 → 清空桌面按「拍空桌」 → 登記牌組（只需一次）→ 運行。相機或燈光移動過，要重新拍空桌。桌面要比牌暗。</p>
   </section>

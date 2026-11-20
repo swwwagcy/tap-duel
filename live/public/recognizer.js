@@ -77,11 +77,27 @@
     var x1 = Math.min(frame.width - 1, Math.ceil(rect.x + rect.w)), y1 = Math.min(frame.height - 1, Math.ceil(rect.y + rect.h));
     var W = x1 - x0 + 1, H = y1 - y0 + 1;
     if (W < 8 || H < 8) return null;
-    var mask = new Uint8Array(W * H), columns = new Int32Array(W), rows = new Int32Array(H);
+    // Two masks in one pass: pixels brighter than the empty table (ignores the card's shadow), and
+    // pixels that differ from it in any way. The second is the fallback for a light table, where a
+    // white card is barely brighter than what it lies on.
+    var bright = new Uint8Array(W * H), any = new Uint8Array(W * H);
+    var brightColumns = new Int32Array(W), brightRows = new Int32Array(H), anyColumns = new Int32Array(W), anyRows = new Int32Array(H);
+    var nowPixel = [0, 0, 0], emptyPixel = [0, 0, 0];
     for (var y = 0; y < H; y++) for (var x = 0; x < W; x++) {
-      if (lumaAt(frame, x0 + x, y0 + y) - lumaAt(empty, x0 + x, y0 + y) > 30) { mask[y * W + x] = 1; columns[x]++; rows[y]++; }
+      rgbAt(frame, x0 + x, y0 + y, nowPixel); rgbAt(empty, x0 + x, y0 + y, emptyPixel);
+      var lift = (0.299 * (nowPixel[0] - emptyPixel[0]) + 0.587 * (nowPixel[1] - emptyPixel[1]) + 0.114 * (nowPixel[2] - emptyPixel[2]));
+      var change = Math.abs(nowPixel[0] - emptyPixel[0]) + Math.abs(nowPixel[1] - emptyPixel[1]) + Math.abs(nowPixel[2] - emptyPixel[2]);
+      if (lift > 30) { bright[y * W + x] = 1; brightColumns[x]++; brightRows[y]++; }
+      if (change > 60) { any[y * W + x] = 1; anyColumns[x]++; anyRows[y]++; }
     }
-    var spanX = longestRun(columns), spanY = longestRun(rows);
+    var brightCount = 0, anyCount = 0;
+    for (var cell = 0; cell < bright.length; cell++) { brightCount += bright[cell]; anyCount += any[cell]; }
+    var mask = bright, spanX = longestRun(brightColumns), spanY = longestRun(brightRows), lightTable = false;
+    // On a light table only part of the card clears the brightness bar; when far fewer pixels are
+    // brighter than are different, the brighter set is a fragment of the card, not the card.
+    if (!spanX || !spanY || (spanX[1] - spanX[0]) * (spanY[1] - spanY[0]) < 60 || brightCount < anyCount * 0.6) {
+      mask = any; spanX = longestRun(anyColumns); spanY = longestRun(anyRows); lightTable = true;
+    }
     if (!spanX || !spanY) return null;
     var count = 0, sumX = 0, sumY = 0;
     for (y = spanY[0]; y <= spanY[1]; y++) for (x = spanX[0]; x <= spanX[1]; x++) if (mask[y * W + x]) { count++; sumX += x; sumY += y; }
@@ -125,10 +141,10 @@
       // Not card-shaped (a hand, two cards, a card on its side): fall back to the box and the aspect.
       var c = Math.abs(cos), s = Math.abs(sin), boxW = spanX[1] - spanX[0] + 1, boxH = spanY[1] - spanY[0] + 1;
       height = (boxW + boxH) / ((1 + CARD_ASPECT) * (c + s)); width = height * CARD_ASPECT;
-      return { cx: x0 + meanX + 0.5, cy: y0 + meanY + 0.5, w: width, h: height, angle: angle, shaped: false };
+      return { cx: x0 + meanX + 0.5, cy: y0 + meanY + 0.5, w: width, h: height, angle: angle, shaped: false, lightTable: lightTable };
     }
     var midU = (spanU[0] + spanU[1]) / 2 - reach, midV = (spanV[0] + spanV[1]) / 2 - reach;
-    return { cx: x0 + meanX + 0.5 + midU * cos - midV * sin, cy: y0 + meanY + 0.5 + midU * sin + midV * cos, w: width, h: height, angle: angle, shaped: true };
+    return { cx: x0 + meanX + 0.5 + midU * cos - midV * sin, cy: y0 + meanY + 0.5 + midU * sin + midV * cos, w: width, h: height, angle: angle, shaped: true, lightTable: lightTable };
   }
   function halfPeak(profile) {
     var peak = 0, index;
@@ -308,7 +324,12 @@
     var average = function (list) { return list.reduce(function (a, b) { return a + b; }, 0) / list.length; };
     var redAverage = average(red), blackAverage = average(black);
     if (redAverage - blackAverage < 0.03) return null;      // colour does not separate the suits on this table
-    return { cut: (redAverage + blackAverage) / 2, spread: (redAverage - blackAverage) / 2 };
+    var cut = (redAverage + blackAverage) / 2, spread = (redAverage - blackAverage) / 2;
+    // Only trust colour when every registered card sits clearly on its own side. Decks that print
+    // diamonds teal or use four suit colours, or light that turns red brown, would otherwise make
+    // the check reject correct readings.
+    var clean = templates.every(function (template) { return template.isRed ? template.red > cut + spread * 0.3 : template.red < cut - spread * 0.3; });
+    return clean ? { cut: cut, spread: spread } : null;
   }
 
   // Best correlation of any of the shifted probe images with a reference, and which shift gave it.

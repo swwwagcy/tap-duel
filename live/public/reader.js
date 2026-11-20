@@ -42,7 +42,7 @@
   function setPhase(table) {
     if (table) autoDeal(table);
     $('phase').dataset.phase = table ? table.phase : 'idle';
-    $('phase').textContent = table ? (table.phase === 'dealing' ? '出牌中' + (table.next ? '・下一張 ' + Games.zoneLabel(game(), table.next) : '') : Live.PHASE[table.phase]) : '未連線';
+    $('phase').textContent = table ? game().name + '・' + (table.phase === 'dealing' ? '出牌中' + (table.next ? '・下一張 ' + Games.zoneLabel(game(), table.next) : '') : Live.PHASE[table.phase]) : '未連線';
   }
 
   function game() { return Games.GAMES[state.tableId]; }
@@ -158,6 +158,7 @@
         drawOverlay();
         sendFrame();
         sendStatus();
+        if (!state.readoutsAt || started - state.readoutsAt > 400) { state.readoutsAt = started; buildReadouts(); }
         state.ticks.push(started); while (state.ticks.length && started - state.ticks[0] > 2000) state.ticks.shift();
       } catch (error) {
         if (!state.loopErrorShown) { state.loopErrorShown = true; Live.toast('讀取相機畫面失敗：' + (error && error.message || error), 'bad'); }
@@ -173,24 +174,26 @@
       var zs = state.zoneState[zone.id], rect = rectOf(zone.id);
       var sig = R.signature(frame, rect), covered = R.coverage(sig, state.emptySigs[zone.id]);
       var moved = zs.prev ? R.motion(sig, zs.prev) : 99;
-      zs.prev = sig;
+      zs.prev = sig; zs.coverage = covered; zs.moving = moved; zs.why = '';
       if (covered < defaults.presence * 0.5) {
         zs.still = 0; zs.samples = []; zs.attempts = 0;
         if (++zs.emptyCount >= EMPTY_FRAMES && zs.status !== 'empty') { zs.status = 'empty'; zs.result = null; report(zone.id, { state: 'empty' }); }
         return;
       }
       zs.emptyCount = 0;
-      if (covered < defaults.presence) return;
+      if (covered < defaults.presence) { zs.why = '變化太小，看不出有牌'; return; }
+      if (moved > defaults.stillness) { zs.why = '畫面在動，等牌放穩'; }
       if (moved > defaults.stillness) { zs.still = 0; zs.samples = []; zs.attempts = 0; zs.status = 'busy'; return; }
       zs.still++;
       if (zs.status !== 'busy' && zs.status !== 'empty') return;      // this placement was already read
       if (zs.still < STILL_FRAMES) return;
       var found = R.locate(frame, state.empty, rect);
       if (!found) {
+        zs.why = '找不到牌的輪廓（桌面太亮或光線變了？可以重拍空桌）';
         if (zs.still > STILL_FRAMES + 8) finish(zone.id, zs, rect, null);
         return;
       }
-      state.lastSize = Math.round(found.h);
+      state.lastSize = Math.round(found.h); zs.height = Math.round(found.h); zs.lightTable = !!found.lightTable;
       zs.samples.push(state.mode === 'deck' ? R.describeRaw(frame, found) : R.describeProbe(frame, found));
       if (zs.samples.length >= READ_FRAMES) finish(zone.id, zs, rect, found);
     });
@@ -326,12 +329,31 @@
     saveZones();
   });
 
+  // What stops reading right now, in the order it has to be fixed. Shown above the positions.
+  function blocker() {
+    if (!state.source) return '還沒開始相機。';
+    if (!state.empty) return '還沒拍空桌，讀牌尚未啟動：清空桌面後按「拍空桌」。';
+    if (!Object.keys(state.deck).length) return '還沒登記牌組，讀到的牌會一律標成認不出來。';
+    if (state.mode !== 'run') return '目前在「' + (state.mode === 'deck' ? '登記牌組' : '調整牌位') + '」，回到「運行」才會把牌送給主持台。';
+    if (!link || !link.online) return '沒有連上伺服器，讀到的牌不會送出。';
+    if (state.table && state.table.phase !== 'dealing') return '主持台的「' + game().name + '」還沒到出牌階段（目前：' + Live.PHASE[state.table.phase] + '）。讀到的牌會顯示在這裡，但要到出牌階段才會送出；主持台要選同一款遊戲。';
+    return '';
+  }
+  // Each position shows its state and the numbers behind it, so a stalled step is visible.
   function buildReadouts() {
+    var stop = blocker();
+    $('blocker').hidden = !stop; $('blocker').textContent = stop;
     $('readouts').innerHTML = game().zones.map(function (zone) {
       var zs = state.zoneState[zone.id] || {};
       var card = zs.status === 'card' && zs.result ? zs.result.card : null;
-      var text = zs.status === 'card' ? Math.round(zs.result.score * 100) + '%' : zs.status === 'unsure' ? '認不出來' : zs.status === 'busy' ? '偵測中' : '空';
-      return '<div class="readout ' + zone.side + '">' + Live.cardHtml(card) + '<div><div class="label">' + Live.escape(zone.label) + '</div><div class="muted">' + text + '</div></div></div>';
+      var text = zs.status === 'card' ? '認到 ' + Math.round(zs.result.score * 100) + '%' : zs.status === 'unsure' ? '認不出來' : zs.status === 'busy' ? '偵測中' : '空';
+      var numbers = [];
+      if (zs.coverage != null) numbers.push('覆蓋 ' + Math.round(zs.coverage * 100) + '%');
+      if (zs.moving != null && zs.moving < 90) numbers.push('晃動 ' + zs.moving.toFixed(0));
+      if (zs.height) numbers.push('牌高 ' + zs.height + 'px' + (zs.lightTable ? '（淺色桌面模式）' : ''));
+      if (zs.result) numbers.push('最像 ' + Games.cardLabel(zs.result.card) + ' ' + zs.result.score.toFixed(2) + '／差距 ' + zs.result.margin.toFixed(2));
+      return '<div class="readout ' + zone.side + '">' + Live.cardHtml(card) + '<div style="min-width:0"><div class="label">' + Live.escape(zone.label) + '　' + text + '</div>' +
+        '<div class="diag">' + numbers.join('・') + '</div>' + (zs.why && zs.status !== 'card' ? '<div class="why">' + Live.escape(zs.why) + '</div>' : '') + '</div></div>';
     }).join('');
   }
 

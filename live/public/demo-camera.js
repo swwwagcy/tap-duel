@@ -17,9 +17,10 @@
     10: [[0, 0], [1, 0], [0.5, 0.17], [0, 0.33], [1, 0.33], [0, 0.67], [1, 0.67], [0.5, 0.83], [0, 1], [1, 1]]
   };
 
-  function drawCard(ctx, card, cw, ch) {
+  // palette (optional): ink colour per suit, e.g. { D: '#11a99a' } for a deck with teal diamonds.
+  function drawCard(ctx, card, cw, ch, palette) {
     var suit = card[0], rank = card.slice(1), red = suit === 'H' || suit === 'D';
-    var ink = red ? '#c8102e' : '#111';
+    var ink = (palette && palette[suit]) || (red ? '#c8102e' : '#111');
     ctx.fillStyle = '#f7f7f2';
     ctx.strokeStyle = '#bbb';
     ctx.lineWidth = Math.max(1, cw * 0.015);
@@ -67,7 +68,7 @@
     var context = canvas.getContext('2d', { willReadFrequently: true });
     var base = document.createElement('canvas'); base.width = width; base.height = height;
     var baseContext = base.getContext('2d');
-    baseContext.fillStyle = '#1f5e3a'; baseContext.fillRect(0, 0, width, height);
+    baseContext.fillStyle = options.felt || '#1f5e3a'; baseContext.fillRect(0, 0, width, height);
     var grain = baseContext.getImageData(0, 0, width, height);
     for (var index = 0; index < grain.data.length; index += 4) { var g = (random() - 0.5) * 14; grain.data[index] += g; grain.data[index + 1] += g; grain.data[index + 2] += g; }
     baseContext.putImageData(grain, 0, 0);
@@ -77,7 +78,7 @@
       placed.forEach(function (p) {
         context.save(); context.translate(p.x, p.y); context.rotate((p.angle || 0) + (p.flip ? Math.PI : 0));
         context.shadowColor = 'rgba(0,0,0,0.35)'; context.shadowBlur = 4; context.shadowOffsetY = 2;
-        drawCard(context, p.card, p.h * 0.716, p.h);
+        drawCard(context, p.card, p.h * 0.716, p.h, options.palette);
         context.restore();
       });
       var image = context.getImageData(0, 0, width, height);

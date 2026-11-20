@@ -99,6 +99,8 @@ STAFF_KEY=自己定一組密碼 npm start
 ```bash
 npm test                   # 兩款遊戲的規則與點數計算
 npm run test:recognizer    # 光學辨識準確度（合成牌）
+node test/light-table.test.js   # 淺色桌面（牌只比桌面亮一點）
+node test/colour-deck.test.js   # 方塊印成青綠色的牌組：顏色檢查要自動停用
 npm run test:e2e           # 啟動伺服器，瀏覽器跑完整回合，最後一回合由讀牌器頁面看合成攝影機畫面
 npm run test:demo          # 只用靜態檔案（像 GitHub Pages）跑示範模式的兩款遊戲與分頁共用
 npm run test:all           # 以上全部
