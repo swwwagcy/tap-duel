@@ -36,7 +36,6 @@
     } else if (message.t === 'frame') {
       if (message.table !== state.tableId) return;
       $('live').src = message.image; $('live').hidden = false;
-      if ($('live').naturalWidth) document.querySelector('.camera').style.aspectRatio = String(Math.max(0.9, Math.min(1.9, $('live').naturalWidth / $('live').naturalHeight)));
     } else if (message.t === 'notice') {
       if (message.table === state.tableId) note(message.text, message.level);
     } else if (message.t === 'error') {
@@ -145,7 +144,13 @@
       return;
     }
     var check = table.check;
-    if (table.next) { guide.textContent = '下一張：' + Games.zoneLabel(current, table.next); return; }
+    // What needs the host first: a card the reader could not read, then the next card to turn.
+    var unread = current.zones.filter(function (zone) { var entry = table.cards[zone.id]; return entry && entry.uncertain; });
+    if (unread.length) { guide.classList.add('bad'); guide.textContent = unread.map(function (zone) { return zone.label; }).join('、') + ' 認不出來：點那個牌位選牌。'; return; }
+    if (table.next) {
+      var waiting = table.cards[table.next] && table.cards[table.next].back;
+      guide.textContent = (waiting ? '請翻開：' : '下一張：') + Games.zoneLabel(current, table.next); return;
+    }
     if (check && check.ok) { guide.textContent = '牌已到齊，核對後按「確認結果」。'; return; }
     guide.classList.add('bad');
     if (check && check.duplicate) guide.textContent = Games.cardLabel(check.duplicate) + ' 出現兩次，請改正。';
@@ -206,6 +211,8 @@
     var quick = entry && entry.top ? entry.top : [];
     $('pickerQuick').innerHTML = quick.map(function (item) { return '<button type="button" data-card="' + item.card + '">' + Games.cardLabel(item.card) + ' <span class="muted">' + Math.round(item.score * 100) + '%</span></button>'; }).join('');
     $('pickerQuick').hidden = !quick.length;
+    $('pickerShot').hidden = !(entry && entry.shot);
+    if (entry && entry.shot) $('pickerShot').src = entry.shot;
     $('pickerSuits').innerHTML = Games.SUITS.map(function (suit) { return '<button type="button" class="' + (suit === 'H' || suit === 'D' ? 'red' : '') + (state.pickSuit === suit ? ' on' : '') + '" data-suit="' + suit + '">' + Games.SUIT_SYMBOL[suit] + '</button>'; }).join('');
     $('pickerRanks').innerHTML = Games.RANKS.map(function (rank) { return '<button type="button" data-rank="' + rank + '"' + (state.pickSuit ? '' : ' disabled') + '>' + rank + '</button>'; }).join('');
   }
@@ -259,7 +266,8 @@
     state.notes.unshift({ text: text, level: level, at: Date.now() });
     if (state.notes.length > 20) state.notes.length = 20;
     renderNotes();
-    Live.toast(text, level === 'warn' ? '' : 'good');
+    // The note list is hidden on narrow screens; only then does the message need to pop up.
+    if (!$('notes').offsetParent && $('picker').hidden) Live.toast(text, level === 'warn' ? '' : 'good');
   }
   function renderNotes() {
     $('notes').innerHTML = state.notes.length ? state.notes.map(function (item) { return '<p class="' + (item.level || '') + '">' + new Date(item.at).toLocaleTimeString('zh-TW', { hour12: false }) + '　' + Live.escape(item.text) + '</p>'; }).join('') : '<p class="muted">提醒會顯示在這裡。</p>';
