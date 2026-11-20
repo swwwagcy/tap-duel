@@ -437,6 +437,12 @@
       state.dealt = {};
       return;
     }
+    // The simulated host clears the table a moment after the result, as a real one must.
+    if ((table.phase === 'result' || table.phase === 'void') && state.fake.placed().length && !state.clearing) {
+      state.clearing = true;
+      setTimeout(function () { state.clearing = false; if (state.table && (state.table.phase === 'result' || state.table.phase === 'void')) { state.fake.place([]); state.dealt = {}; } }, 2500);
+      return;
+    }
     if (table.phase !== 'dealing' || !table.next || state.dealt[table.next] || state.dealPending) return;
     var zoneId = table.next;
     state.dealPending = true;

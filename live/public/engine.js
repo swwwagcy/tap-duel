@@ -42,7 +42,8 @@
         frame: null,
         frameSentAt: 0,
         readerSeenAt: 0,
-        readerInfo: null
+        readerInfo: null,
+        seen: {}              // zone -> what the reader last saw there, in any phase
       };
     });
     const viewers = new Map();           // viewerId -> { id, name, points }
@@ -105,6 +106,7 @@
         totals: totalsOf(round),
         pickers: round ? round.picks.size : 0,
         readerOnline: Date.now() - table.readerSeenAt < READER_TIMEOUT_MS,
+        stale: ['idle', 'result', 'void'].indexOf(table.phase) >= 0 ? staleZones(table) : [],
         auto: table.settings.auto
       };
       if (role !== 'viewer') {
@@ -159,8 +161,18 @@
 
     /* ------------------------------------------------------------------ round flow */
 
-    function openRound(table) {
+    // Positions where the reader still sees a face-up (or unreadable) card. Between rounds these
+    // are last round's cards: left there, they would be read as the new round's cards the moment
+    // dealing starts. Face-down cards are fine; they are the next round's, placed early.
+    function staleZones(table) {
+      if (Date.now() - table.readerSeenAt >= READER_TIMEOUT_MS) return [];
+      return table.game.zones.map(function (zone) { return zone.id; }).filter(function (zone) { return table.seen[zone] === 'card' || table.seen[zone] === 'unsure'; });
+    }
+
+    function openRound(table, force) {
       if (['idle', 'result', 'void'].indexOf(table.phase) < 0) return '這一回合還沒結束。';
+      const stale = staleZones(table);
+      if (stale.length && !force) return '桌上還有上一回合的牌（' + stale.map(function (zone) { return Games.zoneLabel(table.game, zone); }).join('、') + '），請先收掉。';
       table.round = newRound(table);
       table.phase = 'open';
       table.endsAt = Date.now() + table.settings.openSeconds * 1000;
@@ -244,8 +256,8 @@
           table.phase = 'dealing';
           table.endsAt = 0;
           broadcastTable(table);
-        } else if ((table.phase === 'result' || table.phase === 'void') && table.settings.auto && now >= table.endsAt) {
-          openRound(table);
+        } else if ((table.phase === 'result' || table.phase === 'void') && table.settings.auto && now >= table.endsAt && !staleZones(table).length) {
+          openRound(table);   // waits for the table to be cleared
         }
       });
     }, 200));
@@ -311,7 +323,7 @@
     function handleHost(socket, message) {
       const table = tables[message.table];
       if (!table) return 'Unknown table.';
-      if (message.t === 'open') return openRound(table);
+      if (message.t === 'open') return openRound(table, !!message.force);
       if (message.t === 'void') return voidRound(table);
       if (message.t === 'confirm') {
         if (table.phase !== 'dealing') return '出牌階段才能確認結果。';
@@ -373,6 +385,10 @@
       const zone = message.zone;
       const label = Games.zoneLabel(table.game, zone);
       if (!table.game.zones.some(function (item) { return item.id === zone; })) return 'Unknown zone.';
+      if (table.seen[zone] !== message.state) {
+        table.seen[zone] = message.state;
+        if (['idle', 'result', 'void'].indexOf(table.phase) >= 0) broadcastSoon(table);   // the host watches the table being cleared
+      }
       if (!round) return null;
       const existing = round.cards[zone];
       // Before dealing, cards may already lie face down. A face-down card is shown as such; a card

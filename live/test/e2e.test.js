@@ -33,6 +33,7 @@ function scriptedReader() {
     socket.on('message', raw => { if (JSON.parse(raw).t === 'welcome') resolve(socket); });
   });
 }
+const clear = (socket, table, zones) => zones.forEach(zone => socket.send(JSON.stringify({ t: 'zone', table, zone, state: 'empty' })));
 const card = (socket, table, zone, value) => socket.send(JSON.stringify({ t: 'zone', table, zone, state: 'card', card: value, score: 0.95, margin: 0.8, top: [{ card: value, score: 0.95 }] }));
 
 (async () => {
@@ -80,6 +81,15 @@ const card = (socket, table, zone, value) => socket.send(JSON.stringify({ t: 'zo
   assert.ok(banner.includes('紅方勝') && banner.includes('+100'), 'banner: ' + banner);
   step('duel round: red wins, 300 in, 400 back, viewer shows 10,100 and the result banner');
 
+  /* Old cards still on the table: the host is told, one press does not start, clearing does. */
+  await until(() => host.evaluate(() => document.getElementById('guide').textContent.includes('請先收掉桌上的牌')), 'host told to clear the table');
+  await host.click('#mainButton');
+  await wait(400);
+  assert.strictEqual(await host.evaluate(() => document.getElementById('phaseBox').dataset.phase), 'result', 'one press must not start a round over old cards');
+  clear(reader, 'duel', ['R', 'U']);
+  await until(() => host.evaluate(() => document.getElementById('mainButton').textContent === '開始新回合' && !document.getElementById('guide').textContent.includes('收掉')), 'host free to start once the table is clear');
+  step('stale cards block the next round until the table is cleared');
+
   /* Round 2: nine, blue draws a third card, tie. */
   await host.click('#tableTabs button[data-table="nine"]');
   await viewer.click('#tableTabs button[data-table="nine"]');
@@ -99,6 +109,8 @@ const card = (socket, table, zone, value) => socket.send(JSON.stringify({ t: 'zo
   await until(() => host.evaluate(() => !document.getElementById('mainButton').disabled), 'nine confirm enabled');
   await host.click('#mainButton');
   await until(async () => (await points()) === 10900, 'nine payout: blue pushed 100 + tie 900');
+  clear(reader, 'nine', ['U1', 'U2', 'U3', 'R1', 'R2', 'R3']);
+  await until(() => host.evaluate(() => document.getElementById('mainButton').textContent === '開始新回合'), 'table clear after the nine round');
   step('nine round: third-card prompt, extra card refused, tie pays 9x and blue is returned (10,900)');
 
   /* Round 3: host corrects a card by hand, then cancels the round: everything is returned. */
@@ -115,9 +127,10 @@ const card = (socket, table, zone, value) => socket.send(JSON.stringify({ t: 'zo
   assert.ok((await host.textContent('.zone[data-zone="U1"] .cardface')).includes('7'), 'manual card kept');
   await host.click('#voidButton'); await host.click('#voidButton');
   await until(async () => (await points()) === 10900, 'cancel returns the 500');
+  clear(reader, 'nine', ['U1', 'U2', 'U3', 'R1', 'R2', 'R3']);
   step('manual correction wins over the camera; cancelling returns every point');
   /* Face-down cards: placed during the countdown, shown as backs, read once turned over. */
-  await until(() => host.evaluate(() => !document.getElementById('mainButton').disabled), 'can start the face-down round');
+  await until(() => host.evaluate(() => document.getElementById('mainButton').textContent === '開始新回合'), 'can start the face-down round');
   await host.click('#mainButton');
   await until(() => host.evaluate(() => document.getElementById('phaseBox').dataset.phase === 'open'), 'face-down round open');
   const notesBefore = await host.evaluate(() => document.querySelectorAll('#notes .warn').length);

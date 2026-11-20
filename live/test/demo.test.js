@@ -27,7 +27,7 @@ async function playRound(page, table, spot) {
   const frame = name => page.frame({ url: new RegExp(name + '\\.html') });
   const host = frame('host'), viewer = frame('play'), reader = frame('reader');
   await until(() => reader.evaluate(() => window.__readerState && !!window.__readerState.frame), table + ': reader camera running', 40000);
-  await until(() => host.evaluate(() => document.querySelector('.zone') && !document.getElementById('mainButton').disabled), table + ': host ready');
+  await until(() => host.evaluate(() => document.querySelector('.zone') && document.getElementById('mainButton').textContent === '開始新回合'), table + ': host ready');
   const before = await viewer.evaluate(() => Number(document.getElementById('points').textContent.replace(/,/g, '')));
   await host.click('#mainButton');
   await until(() => viewer.evaluate(s => !document.querySelector('.spot[data-spot="' + s + '"]').disabled, spot), table + ': viewer can choose');

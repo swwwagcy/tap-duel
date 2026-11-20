@@ -139,6 +139,12 @@
   function renderGuide() {
     var table = state.table, guide = $('guide'), current = game();
     guide.classList.remove('bad');
+    var stale = table.stale || [];
+    if (stale.length) {
+      guide.classList.add('bad');
+      guide.textContent = '請先收掉桌上的牌：' + stale.map(function (zone) { return Games.zoneLabel(current, zone); }).join('、') + (table.auto ? '。收完會自動開下一回合。' : '。');
+      return;
+    }
     if (table.phase !== 'dealing') {
       guide.textContent = table.phase === 'idle' ? '按「開始新回合」開放觀眾選擇。' : table.phase === 'open' ? '倒數中。可以先把牌背面朝上放好，先不要翻開。' : table.phase === 'closed' ? '已截止，等待直播延遲過去。' : table.phase === 'result' ? '已結算。清桌後可開下一回合。' : '本回合已取消，點數已退回。';
       return;
@@ -166,7 +172,11 @@
 
   function renderButtons() {
     var table = state.table, main = $('mainButton'), phase = table.phase;
-    if (phase === 'idle' || phase === 'result' || phase === 'void') { main.textContent = '開始新回合'; main.disabled = false; }
+    if (phase === 'idle' || phase === 'result' || phase === 'void') {
+      var blocked = (table.stale || []).length > 0, armed = blocked && Date.now() < state.openArmedUntil;
+      main.textContent = !blocked ? '開始新回合' : armed ? '再按一次：不收牌直接開始' : '桌上還有牌，先收掉';
+      main.disabled = false;
+    }
     else if (phase === 'dealing') { main.textContent = '確認結果'; main.disabled = !(table.check && table.check.ok); }
     else { main.textContent = '等待截止'; main.disabled = true; }
     var canVoid = phase === 'open' || phase === 'closed' || phase === 'dealing';
@@ -195,6 +205,8 @@
     var counting = table.phase === 'open' || table.phase === 'closed' || ((table.phase === 'result' || table.phase === 'void') && table.auto);
     $('count').textContent = counting ? Live.secondsLeft(table.endsAt) : '';
     if (state.voidArmedUntil && Date.now() > state.voidArmedUntil) { state.voidArmedUntil = 0; renderButtons(); }
+    if (state.openArmedUntil && Date.now() > state.openArmedUntil) { state.openArmedUntil = 0; renderButtons(); }
+    if ((table.stale || []).length) $('count').textContent = '';
   }
   setInterval(tick, 250);
 
@@ -234,6 +246,11 @@
     var table = state.table;
     if (!table || $('mainButton').disabled) return;
     if (table.phase === 'dealing') link.send({ t: 'confirm', table: state.tableId });
+    else if ((table.stale || []).length) {
+      // Old cards still on the table: the first press only warns, a second one within 3 s overrides.
+      if (Date.now() < state.openArmedUntil) { state.openArmedUntil = 0; link.send({ t: 'open', table: state.tableId, force: true }); }
+      else { state.openArmedUntil = Date.now() + 3000; renderButtons(); }
+    }
     else link.send({ t: 'open', table: state.tableId });
   }
   $('mainButton').addEventListener('click', primary);
