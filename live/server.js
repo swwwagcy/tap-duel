@@ -49,7 +49,11 @@ wss.on('connection', function (socket) {
   socket.isAlive = true;
   socket.on('pong', function () { socket.isAlive = true; });
   socket.on('close', function () { engine.disconnect(connection); });
-  socket.on('message', function (raw) { engine.receive(connection, raw.toString()); });
+  // One bad message must not take the server, and every table's state with it, down.
+  socket.on('message', function (raw) {
+    try { engine.receive(connection, raw.toString()); }
+    catch (error) { console.error('Message dropped: ' + (error && error.stack || error)); }
+  });
 });
 
 // Keep idle connections alive through Cloud Run and proxies, and drop dead ones.

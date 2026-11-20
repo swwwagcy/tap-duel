@@ -63,4 +63,45 @@ check('checkComplete catches missing, extra and duplicate cards', () => {
   assert.deepStrictEqual(Games.checkComplete(nine, { U1: 'S2', R1: 'H3', U2: 'D3', R2: 'C3' }).missing, ['U3']);
   assert.strictEqual(Games.checkComplete(duel, { R: 'S5', U: 'S5' }).duplicate, 'S5');
 });
+
+// The engine takes messages from anyone who can open a connection.
+const Engine = require('../public/engine.js');
+function withEngine(fn) {
+  const engine = Engine.createEngine({ staffKeyMatches: (key) => key === 'k' });
+  const open = () => { const got = []; const connection = { deliver: (message) => got.push(message) }; engine.connect(connection); return { connection, got, say: (message) => engine.receive(connection, JSON.stringify(message)) }; };
+  try { fn(engine, open); } finally { engine.stop(); }
+}
+
+check('table names every object has are not tables', () => withEngine((engine, open) => {
+  ['constructor', '__proto__', 'toString', 'hasOwnProperty', '', null, 5, {}, ['duel']].forEach((name) => {
+    const viewer = open(); viewer.say({ t: 'hello', role: 'viewer' });
+    ['watch', 'pick', 'undo'].forEach((t) => viewer.say({ t, table: name, spot: 'R', amount: 10 }));
+    const host = open(); host.say({ t: 'hello', role: 'host', key: 'k' });
+    ['watch', 'open', 'void', 'confirm', 'setCard', 'settings'].forEach((t) => host.say({ t, table: name }));
+    const reader = open(); reader.say({ t: 'hello', role: 'reader', key: 'k' });
+    ['watch', 'zone', 'status', 'frame'].forEach((t) => reader.say({ t, table: name, zone: 'R', state: 'card', card: 'S5' }));
+    [viewer, host, reader].forEach((who) => assert.strictEqual(who.got.filter((message) => message.t === 'table').length, 0));
+  });
+  assert.strictEqual(engine.tables.duel.phase, 'idle');
+}));
+
+check('nothing is shown before a role is set, and a wrong key sets none', () => withEngine((engine, open) => {
+  const stranger = open();
+  stranger.say({ t: 'watch', table: 'duel' });
+  assert.deepStrictEqual(stranger.got.map((message) => message.t), ['error']);
+  stranger.say({ t: 'hello', role: 'host', key: 'wrong' });
+  stranger.say({ t: 'watch', table: 'duel' });
+  stranger.say({ t: 'open', table: 'duel' });
+  assert.strictEqual(stranger.got.filter((message) => message.t === 'table').length, 0);
+  assert.strictEqual(engine.tables.duel.phase, 'idle');
+}));
+
+check('a viewer gets the viewer view, staff get the staff view', () => withEngine((engine, open) => {
+  const viewer = open(); viewer.say({ t: 'hello', role: 'viewer' }); viewer.say({ t: 'watch', table: 'duel' });
+  const seen = viewer.got.find((message) => message.t === 'table').table;
+  ['settings', 'history', 'readerInfo', 'check'].forEach((key) => assert.ok(!(key in seen), key));
+  const host = open(); host.say({ t: 'hello', role: 'host', key: 'k' }); host.say({ t: 'watch', table: 'duel' });
+  assert.ok('history' in host.got.find((message) => message.t === 'table').table);
+}));
+
 console.log(count + ' checks passed');

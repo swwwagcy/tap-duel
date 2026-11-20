@@ -49,6 +49,13 @@
     const viewers = new Map();           // viewerId -> { id, name, points }
     const connections = new Set();       // every open connection: { deliver(message), role, watching, viewerId }
 
+    // Table ids come from clients. Only the tables' own names count: a plain lookup would also
+    // answer to names every object has ("constructor", "__proto__") and hand back something that
+    // is not a table.
+    function tableOf(id) {
+      return typeof id === 'string' && Object.prototype.hasOwnProperty.call(tables, id) ? tables[id] : null;
+    }
+
     function newRound(table) {
       const now = new Date();
       table.sequence += 1;
@@ -276,7 +283,7 @@
     function handleViewer(socket, message) {
       const viewer = viewers.get(socket.viewerId);
       if (message.t === 'pick') {
-        const table = tables[message.table];
+        const table = tableOf(message.table);
         if (!table) return 'Unknown table.';
         if (table.phase !== 'open') return '現在不能選擇，請等下一回合。';
         const spot = table.game.spots.find(function (item) { return item.id === message.spot; });
@@ -295,7 +302,7 @@
         return null;
       }
       if (message.t === 'undo') {
-        const table = tables[message.table];
+        const table = tableOf(message.table);
         if (!table || table.phase !== 'open') return '現在不能撤回。';
         const list = table.round.picks.get(viewer.id);
         if (!list || !list.length) return null;
@@ -321,7 +328,7 @@
     }
 
     function handleHost(socket, message) {
-      const table = tables[message.table];
+      const table = tableOf(message.table);
       if (!table) return 'Unknown table.';
       if (message.t === 'open') return openRound(table, !!message.force);
       if (message.t === 'void') return voidRound(table);
@@ -359,7 +366,7 @@
     }
 
     function handleReader(socket, message) {
-      const table = tables[message.table];
+      const table = tableOf(message.table);
       if (!table) return 'Unknown table.';
       table.readerSeenAt = Date.now();
       if (message.t === 'frame') {
@@ -465,16 +472,16 @@
       if (!message || typeof message.t !== 'string') return;
       let problem = null;
       if (message.t === 'hello') problem = hello(socket, message);
+      else if (!socket.role) problem = 'Say hello first.';   // nothing, not even a look at a table, before a role is set
       else if (message.t === 'watch') {
-        if (!tables[message.table]) problem = 'Unknown table.';
+        const table = tableOf(message.table);
+        if (!table) problem = 'Unknown table.';
         else {
-          socket.watching = message.table;
-          const table = tables[message.table];
+          socket.watching = table.id;
           send(socket, { t: 'table', table: tableView(table, socket.role === 'viewer' ? 'viewer' : 'staff') });
           if (table.frame && socket.role !== 'reader') send(socket, { t: 'frame', table: table.id, image: table.frame.image, at: table.frame.at });
         }
       }
-      else if (!socket.role) problem = 'Say hello first.';
       else if (socket.role === 'viewer') problem = handleViewer(socket, message);
       else if (socket.role === 'host') problem = handleHost(socket, message);
       else if (socket.role === 'reader') problem = handleReader(socket, message);
