@@ -13,7 +13,7 @@
   var WORK_MAX_WIDTH = 1280;
 
   var state = {
-    tableId: Live.store.get('tdl-reader-table', 'duel'), mode: 'run',
+    tableId: ((/[?&]table=(\w+)/.exec(location.search) || [])[1] || Live.store.get('tdl-reader-table', 'duel')), mode: 'run',
     source: null, width: 0, height: 0, frame: null, empty: null, emptySigs: {},
     zones: {}, zoneState: {}, deck: Live.store.get('tdl-deck', {}), model: null,
     deckCard: null, lastRegistered: null, table: null,
@@ -29,7 +29,7 @@
       onStatus: function (online) { if (!online) setPhase(null); },
       onMessage: function (message) {
         if (message.t === 'denied') { link.close(); Live.askStaffKey(start, true); return; }
-        if (message.t === 'welcome') { buildTableTabs(message.tables); link.send({ t: 'watch', table: state.tableId }); }
+        if (message.t === 'welcome') { buildTableTabs(message.tables); link.send({ t: 'watch', table: state.tableId }); if (/[?&]autostart\b/.test(location.search) && Live.demo && !state.source) autoStart(); }
         else if (message.t === 'table' && message.table.id === state.tableId) { state.table = message.table; setPhase(message.table); }
         else if (message.t === 'error') Live.toast(message.text, 'bad');
       }
@@ -40,6 +40,7 @@
 
   function send(message) { if (link && link.online) { message.table = state.tableId; link.send(message); } }
   function setPhase(table) {
+    if (table) autoDeal(table);
     $('phase').dataset.phase = table ? table.phase : 'idle';
     $('phase').textContent = table ? (table.phase === 'dealing' ? '出牌中' + (table.next ? '・下一張 ' + Games.zoneLabel(game(), table.next) : '') : Live.PHASE[table.phase]) : '未連線';
   }
@@ -371,6 +372,79 @@
   });
   overlay.addEventListener('pointerup', function () { if (state.drag) { state.drag = null; saveZones(); } });
   overlay.addEventListener('pointercancel', function () { state.drag = null; });
+
+  /* ---------------- demo: simulated camera, quick registration, automatic dealing ---------------- */
+  if (Live.demo) { $('fakeCamera').hidden = false; $('quickDeck').hidden = false; }
+  function startFake() {
+    state.fake = DemoCamera.source(1280, 720);
+    useSource(state.fake.canvas, 1280, 720);
+    $('fakeCamera').disabled = true;
+    $('autoDealLabel').hidden = false;
+  }
+  $('fakeCamera').addEventListener('click', startFake);
+  function cardHeightFor(zoneId) { var rect = rectOf(zoneId); return Math.min(rect.h * 0.78, rect.w * 0.78 / 0.716); }
+  function zoneCentre(zoneId) { var rect = rectOf(zoneId); return { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 }; }
+
+  // Builds reference images straight from the simulated cards (three noisy frames each), so the
+  // demo does not need 52 manual placements. A real deck still goes through the normal flow.
+  function quickRegister(done) {
+    if (!state.width) { Live.toast('請先開始相機或模擬攝影機。', 'bad'); return; }
+    var camera = DemoCamera.source(state.width, state.height, { still: true });
+    var empty = camera.place([]), zoneId = game().zones[0].id, rect = rectOf(zoneId), centre = zoneCentre(zoneId), height = cardHeightFor(zoneId);
+    var cards = Games.allCards(), index = 0;
+    $('quickDeck').disabled = true;
+    (function next() {
+      if (index >= cards.length) {
+        camera.stop(); state.model = null; Live.store.set('tdl-deck', state.deck); $('quickDeck').disabled = false;
+        renderDeck(); Live.toast('52 張模擬牌已登記。', 'good'); if (done) done(); return;
+      }
+      var card = cards[index++], raws = [];
+      for (var shot = 0; shot < 3; shot++) {
+        var frame = camera.place([{ card: card, h: height, x: centre.x + (Math.random() - 0.5) * 8, y: centre.y + (Math.random() - 0.5) * 8, angle: (Math.random() - 0.5) * 0.04 }]);
+        var found = R.locate(frame, empty, rect);
+        if (found) raws.push(R.describeRaw(frame, found));
+      }
+      if (raws.length) state.deck[card] = R.encodeRaw(R.averageRaw(raws));
+      $('deckCount').textContent = '登記中 ' + index + ' / 52';
+      setTimeout(next, 0);
+    })();
+  }
+  $('quickDeck').addEventListener('click', function () { quickRegister(); });
+
+  // When the host's table asks for a card, put a random unused card on that position.
+  state.dealt = {}; state.dealPending = false; state.shoe = [];
+  function autoDeal(table) {
+    if (!state.fake || !$('autoDeal').checked || state.mode !== 'run') return;
+    if (table.phase === 'open' || table.phase === 'idle') {
+      if (state.fake.placed().length) state.fake.place([]);
+      state.dealt = {};
+      return;
+    }
+    if (table.phase !== 'dealing' || !table.next || state.dealt[table.next] || state.dealPending) return;
+    var zoneId = table.next;
+    state.dealPending = true;
+    setTimeout(function () {
+      state.dealPending = false;
+      if (!state.table || state.table.phase !== 'dealing' || state.table.next !== zoneId || state.dealt[zoneId]) return;
+      var used = Object.keys(state.dealt).map(function (zone) { return state.dealt[zone]; }), card;
+      do { if (!state.shoe.length) state.shoe = shuffle(Games.allCards()); card = state.shoe.pop(); } while (used.indexOf(card) >= 0);
+      state.dealt[zoneId] = card;
+      var centre = zoneCentre(zoneId), rect = rectOf(zoneId), height = cardHeightFor(zoneId);
+      var list = state.fake.placed();
+      list.push({ card: card, h: height, x: centre.x + (Math.random() - 0.5) * rect.w * 0.12, y: centre.y + (Math.random() - 0.5) * rect.h * 0.08, angle: (Math.random() - 0.5) * 0.12, flip: Math.random() < 0.5 });
+      state.fake.place(list);
+    }, 900);
+  }
+  function shuffle(list) { for (var index = list.length - 1; index > 0; index--) { var other = Math.floor(Math.random() * (index + 1)), keep = list[index]; list[index] = list[other]; list[other] = keep; } return list; }
+
+  // demo.html opens the reader with ?autostart: simulated camera, empty table, deck, then run.
+  function autoStart() {
+    startFake();
+    setTimeout(function () {
+      $('captureEmpty').click();
+      if (Object.keys(state.deck).length < 52) { state.deck = {}; quickRegister(); }
+    }, 700);
+  }
 
   loadTable();
   window.__readerState = state;   // read by the automated test

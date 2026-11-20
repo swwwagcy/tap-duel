@@ -121,6 +121,7 @@ const card = (socket, table, zone, value) => socket.send(JSON.stringify({ t: 'zo
   const readerPage = await (await browser.newContext({ viewport: { width: 1100, height: 900 } })).newPage();
   readerPage.on('pageerror', error => errors.push(error.message));
   await readerPage.goto(BASE + '/reader.html#key=' + KEY);
+  await readerPage.addScriptTag({ path: path.join(__dirname, '..', 'public', 'demo-camera.js') });
   await readerPage.addScriptTag({ path: path.join(__dirname, 'synthetic.js') });
   await readerPage.evaluate(() => { window.__fake = SyntheticSource(1280, 720); window.__readerSource = window.__fake.canvas; });
   await until(() => readerPage.evaluate(() => document.querySelectorAll('#tableTabs button').length === 2), 'reader tabs');

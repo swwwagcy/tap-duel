@@ -16,6 +16,7 @@ const REQUIRED_FROM = 120;
   const browser = await chromium.launch();
   const page = await browser.newPage();
   await page.addScriptTag({ path: path.join(__dirname, '..', 'public', 'recognizer.js') });
+  await page.addScriptTag({ path: path.join(__dirname, '..', 'public', 'demo-camera.js') });
   await page.addScriptTag({ path: path.join(__dirname, 'synthetic.js') });
   let failed = false;
   for (const height of CARD_HEIGHTS) {

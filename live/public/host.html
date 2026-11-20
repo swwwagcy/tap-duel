@@ -55,6 +55,7 @@
   .notes { background: var(--surface); border-radius: 12px; padding: 8px 10px; font-size: 13px; overflow-y: auto; min-height: 0; }
   .notes p { margin: 0 0 4px; }
   .notes .warn { color: var(--wait); }
+  #toast { bottom: calc(86px + env(safe-area-inset-bottom, 0px)); }
   .actions { display: grid; grid-template-columns: 2fr 1fr auto; gap: 8px; }
   .actions button { min-height: 58px; font-size: 18px; font-weight: 700; }
   .modal { position: fixed; inset: 0; background: rgba(5,10,20,.75); display: flex; align-items: center; justify-content: center; z-index: 30; padding: 16px; }
@@ -141,6 +142,7 @@
   </div>
 </div>
 <script src="games.js"></script>
+<script src="engine.js"></script>
 <script src="common.js"></script>
 <script src="host.js"></script>
 </body>

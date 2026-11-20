@@ -2,7 +2,7 @@
 (function () {
   'use strict';
   var $ = Live.$;
-  var state = { tableId: Live.store.get('tdl-host-table', 'duel'), table: null, tables: [], pickerZone: null, pickSuit: null, voidArmedUntil: 0, notes: [] };
+  var state = { tableId: ((/[?&]table=(\w+)/.exec(location.search) || [])[1] || Live.store.get('tdl-host-table', 'duel')), table: null, tables: [], pickerZone: null, pickSuit: null, voidArmedUntil: 0, notes: [] };
   var link = null;
 
   function start(key) {

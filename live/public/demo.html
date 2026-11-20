@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Tap Duel Live 示範</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  html, body { min-height: 100%; }
+  .page { padding: calc(10px + env(safe-area-inset-top, 0px)) max(12px, env(safe-area-inset-right, 0px)) calc(16px + env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px)); display: flex; flex-direction: column; gap: 10px; }
+  .head { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .head h1 { margin: 0; font-size: 22px; font-family: var(--font-num); }
+  .head .tabs { min-width: 220px; }
+  .head .spacer { flex: 1; }
+  .steps { margin: 0; padding: 10px 14px 10px 32px; background: var(--surface); border-radius: 12px; color: var(--muted); font-size: 14px; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 4px 20px; }
+  .steps b { color: var(--fg); }
+  .views { display: grid; grid-template-columns: 390px minmax(0, 1.25fr) minmax(0, 1fr); gap: 10px; }
+  .view { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  .view h2 { margin: 0; font-size: 15px; display: flex; justify-content: space-between; gap: 8px; }
+  .view h2 a { color: var(--muted); font-weight: 400; font-size: 13px; }
+  .view iframe { width: 100%; border: 2px solid var(--line); border-radius: 14px; background: var(--bg); }
+  #viewerFrame { height: 820px; }
+  #hostFrame { height: 820px; }
+  #readerFrame { height: 820px; }
+  .switch { display: none; }
+  @media (max-width: 1400px) {
+    .views { grid-template-columns: 390px minmax(0, 1fr); }
+    .view.reader { grid-column: 1 / -1; }
+    #readerFrame { height: 760px; }
+  }
+  @media (max-width: 900px) {
+    .switch { display: flex; }
+    .views { grid-template-columns: minmax(0, 1fr); }
+    .view { display: none; }
+    .view.on { display: flex; }
+    .view iframe { height: calc(100vh - 210px) !important; min-height: 520px; }
+  }
+</style>
+</head>
+<body data-no-demo-tag="1">
+<div class="page">
+  <div class="head">
+    <h1>Tap Duel Live 示範</h1>
+    <div class="tabs" id="gameTabs">
+      <button type="button" data-table="duel">對決</button>
+      <button type="button" data-table="nine">九點</button>
+    </div>
+    <span class="spacer"></span>
+    <button id="restart" type="button">重新開始示範</button>
+  </div>
+  <ol class="steps">
+    <li><b>主持台</b>按「開始新回合」，觀眾有 12 秒可以選擇（另有 5 位示範觀眾會隨機參與）。</li>
+    <li><b>觀眾</b>選籌碼、點格子投入點數。</li>
+    <li>截止後，<b>讀牌器</b>的模擬攝影機會自動把牌放到該出牌的位置並辨識。</li>
+    <li><b>主持台</b>核對讀到的牌，按「確認結果」結算；認不出來的牌點牌位手動選。</li>
+  </ol>
+  <div class="tabs switch" id="viewTabs">
+    <button type="button" data-view="viewer" class="on">觀眾</button>
+    <button type="button" data-view="host">主持台</button>
+    <button type="button" data-view="reader">讀牌器</button>
+  </div>
+  <div class="views">
+    <section class="view viewer on"><h2>觀眾（手機）<a id="viewerLink" target="_blank" rel="noopener">另開分頁</a></h2><iframe id="viewerFrame" title="觀眾"></iframe></section>
+    <section class="view host"><h2>主持台（iPad）<a id="hostLink" target="_blank" rel="noopener">另開分頁</a></h2><iframe id="hostFrame" title="主持台"></iframe></section>
+    <section class="view reader"><h2>讀牌器（牌桌上方的手機，模擬攝影機）<a id="readerLink" target="_blank" rel="noopener">另開分頁</a></h2><iframe id="readerFrame" title="讀牌器" allow="camera"></iframe></section>
+  </div>
+  <p class="muted" style="margin:0;font-size:13px">示範模式：伺服器在這個瀏覽器裡執行，資料不會離開這台裝置，重新整理就重新開始。「另開分頁」開的是另一份示範資料，跟這一頁不共用。點數只用於示範。</p>
+</div>
+<script src="games.js"></script>
+<script src="engine.js"></script>
+<script src="common.js"></script>
+<script>
+(function () {
+  'use strict';
+  // This page owns the demo engine; the three frames below connect to it directly.
+  window.__demoEngine = Engine.createEngine(Live.DEMO_OPTIONS);
+  var table = (/[?&]table=(\w+)/.exec(location.search) || [])[1] || 'duel';
+  function load() {
+    var query = '?demo&table=' + table;
+    document.getElementById('viewerFrame').src = 'play.html' + query;
+    document.getElementById('hostFrame').src = 'host.html' + query;
+    document.getElementById('readerFrame').src = 'reader.html' + query + '&autostart';
+    document.getElementById('viewerLink').href = 'play.html' + query;
+    document.getElementById('hostLink').href = 'host.html' + query;
+    document.getElementById('readerLink').href = 'reader.html' + query;
+    document.querySelectorAll('#gameTabs button').forEach(function (button) { button.classList.toggle('on', button.dataset.table === table); });
+  }
+  document.querySelectorAll('#gameTabs button').forEach(function (button) {
+    button.addEventListener('click', function () {
+      if (button.dataset.table === table) return;
+      table = button.dataset.table;
+      history.replaceState(null, '', '?table=' + table);
+      load();
+    });
+  });
+  document.getElementById('restart').addEventListener('click', function () { location.reload(); });
+  document.querySelectorAll('#viewTabs button').forEach(function (button) {
+    button.addEventListener('click', function () {
+      document.querySelectorAll('#viewTabs button').forEach(function (other) { other.classList.toggle('on', other === button); });
+      document.querySelectorAll('.view').forEach(function (view) { view.classList.toggle('on', view.classList.contains(button.dataset.view)); });
+    });
+  });
+  load();
+})();
+</script>
+</body>
+</html>

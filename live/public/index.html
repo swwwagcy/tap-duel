@@ -20,9 +20,17 @@
 <div class="wrap">
   <h1>Tap Duel Live</h1>
   <p>真人主持、攝影機讀牌的示範系統。點數只用於示範，不能兌換。</p>
+  <a class="role" href="demo.html" id="demoLink" hidden style="border-color:var(--wait)"><b>一頁看全部（示範）</b><span>觀眾、主持台、讀牌器並排，模擬攝影機自動出牌，不需要伺服器</span></a>
   <a class="role" href="play.html"><b>觀眾</b><span>看牌桌、在倒數內選擇、看結果</span></a>
   <a class="role" href="host.html"><b>主持台</b><span>開始回合、核對讀到的牌、確認結果（需要工作人員密碼）</span></a>
   <a class="role" href="reader.html"><b>讀牌器</b><span>架在牌桌上方的手機，負責讀牌與傳送畫面（需要工作人員密碼）</span></a>
 </div>
+<script>
+  // On GitHub Pages (or with ?demo) there is no server: everything runs in the browser.
+  if (/\.github\.io$/.test(location.hostname) || /[?&]demo\b/.test(location.search) || location.protocol === 'file:') {
+    document.getElementById('demoLink').hidden = false;
+    document.querySelectorAll('a.role').forEach(function (link) { if (link.id !== 'demoLink') link.href += '?demo'; });
+  }
+</script>
 </body>
 </html>

@@ -7,7 +7,7 @@
     me = { id: (window.crypto && crypto.randomUUID ? crypto.randomUUID() : 'v' + Math.random().toString(36).slice(2) + Date.now().toString(36)), name: '' };
     Live.store.set('tdl-viewer', me);
   }
-  var state = { tableId: Live.store.get('tdl-viewer-table', 'duel'), table: null, chips: [10, 50, 100, 500, 1000], chip: Live.store.get('tdl-viewer-chip', 100), points: null, picks: {}, refillBelow: 1000, lastResult: null, frameAt: 0 };
+  var state = { tableId: ((/[?&]table=(\w+)/.exec(location.search) || [])[1] || Live.store.get('tdl-viewer-table', 'duel')), table: null, chips: [10, 50, 100, 500, 1000], chip: Live.store.get('tdl-viewer-chip', 100), points: null, picks: {}, refillBelow: 1000, lastResult: null, frameAt: 0 };
 
   var link = Live.connect({
     hello: function () { return { t: 'hello', role: 'viewer', viewerId: me.id, name: me.name }; },

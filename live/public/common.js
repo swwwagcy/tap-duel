@@ -3,6 +3,10 @@
   'use strict';
   var Live = {};
 
+  // Demo mode runs the server inside the browser: on GitHub Pages, from a file, or with ?demo.
+  Live.demo = /\.github\.io$/.test(location.hostname) || /[?&]demo\b/.test(location.search) || location.protocol === 'file:';
+  Live.DEMO_OPTIONS = { staffKeyMatches: function () { return true; }, bots: 5, tableSettings: { openSeconds: 12, waitSeconds: 2, auto: true } };
+
   Live.PHASE = { idle: '待開始', open: '選擇中', closed: '已截止', dealing: '出牌中', result: '結果', void: '已取消' };
 
   Live.store = {
@@ -25,8 +29,43 @@
     return '<span class="cardface ' + (red ? 'red ' : '') + (extraClass || '') + '"><b>' + Live.escape(Games.rankOf(card)) + '</b><i>' + Games.SUIT_SYMBOL[Games.suitOf(card)] + '</i></span>';
   };
 
+  // Demo transport. Inside demo.html the frames use the page's own engine; a standalone tab uses a
+  // shared worker (one engine for all tabs of this browser); without shared workers the tab runs
+  // its own engine. Messages are copied either way, as they would be over a real connection.
+  function demoConnect(options) {
+    var transport, parentEngine = null;
+    function handle(message) {
+      if (message.serverNow) Live.offset = message.serverNow - Date.now();
+      if (message.table && message.table.serverNow) Live.offset = message.table.serverNow - Date.now();
+      options.onMessage(message);
+    }
+    function overEngine(engine) {
+      var connection = { deliver: function (message) { var copy = JSON.parse(JSON.stringify(message)); setTimeout(function () { handle(copy); }, 0); } };
+      engine.connect(connection);
+      window.addEventListener('pagehide', function () { engine.disconnect(connection); });
+      return { post: function (message) { engine.receive(connection, JSON.parse(JSON.stringify(message))); }, close: function () { engine.disconnect(connection); } };
+    }
+    try { if (window.parent !== window && window.parent.__demoEngine) parentEngine = window.parent.__demoEngine; } catch (error) { /* another origin */ }
+    if (parentEngine) { transport = overEngine(parentEngine); Live.embedded = true; document.documentElement.classList.add('embedded'); }
+    else if (window.SharedWorker) {
+      var worker = new SharedWorker('demo-worker.js');
+      worker.port.onmessage = function (event) { handle(event.data); };
+      worker.port.start();
+      transport = { post: function (message) { worker.port.postMessage(message); }, close: function () { worker.port.postMessage({ t: 'bye' }); } };
+      window.addEventListener('pagehide', function () { transport.close(); });
+    } else {
+      if (!Live.localEngine) Live.localEngine = Engine.createEngine(Live.DEMO_OPTIONS);
+      Live.demoAlone = true;
+      transport = overEngine(Live.localEngine);
+    }
+    var api = { online: true, send: function (message) { transport.post(message); }, close: function () { transport.close(); } };
+    setTimeout(function () { transport.post(options.hello()); if (options.onStatus) options.onStatus(true); }, 0);
+    return api;
+  }
+
   // One WebSocket with automatic reconnect. hello() is re-sent on every (re)connect.
   Live.connect = function (options) {
+    if (Live.demo) return demoConnect(options);
     var socket = null, retry = 0, closedByPage = false, queue = [];
     var api = {
       online: false,
@@ -67,6 +106,7 @@
   // Staff pages (host and reader) need the staff key. It can arrive once in the address
   // (#key=...) and is then kept on this device and removed from the address.
   Live.staffKey = function () {
+    if (Live.demo) return 'demo';
     var match = /(?:^|[#&])key=([^&]+)/.exec(location.hash);
     if (match) {
       Live.store.set('tdl-staff-key', decodeURIComponent(match[1]));
@@ -104,6 +144,15 @@
   Live.keepAwake = function () {
     try { if (navigator.wakeLock) navigator.wakeLock.request('screen').catch(function () {}); } catch (error) { /* not available */ }
   };
+
+  // A small tag so nobody mistakes the demo for the real thing.
+  if (Live.demo) document.addEventListener('DOMContentLoaded', function () {
+    if (window.parent !== window || document.body.dataset.noDemoTag) return;
+    var tag = document.createElement('a');
+    tag.className = 'demotag'; tag.href = 'demo.html';
+    tag.textContent = Live.demoAlone ? '示範模式（這個瀏覽器的分頁不共用資料）' : '示範模式';
+    document.body.appendChild(tag);
+  });
 
   window.Live = Live;
 })();
