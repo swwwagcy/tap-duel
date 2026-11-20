@@ -105,7 +105,17 @@
     navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } } }).then(function (stream) {
       var video = $('video');
       video.srcObject = stream;
-      video.onloadedmetadata = function () { video.play(); useSource(video, video.videoWidth, video.videoHeight); };
+      $('startCamera').disabled = true; $('startCamera').textContent = '相機啟動中…';
+      var play = video.play();
+      if (play && play.catch) play.catch(function () { /* waits for the size below either way */ });
+      // Some browsers (iPhone Safari among them) report a 0x0 picture for a moment after the
+      // stream starts. Starting with that size would break every frame afterwards, so wait.
+      var started = Date.now();
+      (function waitForSize() {
+        if (video.videoWidth > 0 && video.videoHeight > 0) { useSource(video, video.videoWidth, video.videoHeight); return; }
+        if (Date.now() - started > 8000) { $('startCamera').disabled = false; $('startCamera').textContent = '開始相機'; Live.toast('相機沒有畫面，請再按一次「開始相機」。', 'bad'); return; }
+        requestAnimationFrame(waitForSize);
+      })();
     }).catch(function (error) { Live.toast('無法開啟相機：' + error.name + '。請允許相機權限。', 'bad'); });
   });
   function useSource(source, sourceWidth, sourceHeight) {
@@ -118,14 +128,15 @@
     $('hint').hidden = true;
     $('video').hidden = source.tagName !== 'VIDEO';
     $('startCamera').textContent = '相機運行中'; $('startCamera').disabled = true;
-    $('captureEmpty').disabled = false;
+    $('captureEmpty').disabled = false; $('captureEmpty').title = '';
     loadTable();
+    if (!state.empty) $('emptyText').textContent = '清空桌面後按「拍空桌」';
     Live.keepAwake();
     tick();
   }
 
   $('captureEmpty').addEventListener('click', function () {
-    if (!state.frame) return;
+    if (!state.frame) { Live.toast('相機畫面還沒準備好，請稍等一下再按。', 'bad'); return; }
     state.empty = new ImageData(new Uint8ClampedArray(state.frame.data), state.width, state.height);
     computeEmptySigs(); resetZoneStates();
     var saved = { image: work.toDataURL('image/jpeg', 0.92), w: state.width, h: state.height, at: Date.now() };
@@ -139,13 +150,18 @@
   function tick() {
     var started = performance.now();
     if (state.source) {
-      workContext.drawImage(state.source, 0, 0, state.width, state.height);
-      state.frame = workContext.getImageData(0, 0, state.width, state.height);
-      process();
-      drawOverlay();
-      sendFrame();
-      sendStatus();
-      state.ticks.push(started); while (state.ticks.length && started - state.ticks[0] > 2000) state.ticks.shift();
+      // One bad frame (a camera hiccup, a stream that briefly stops) must not stop the loop.
+      try {
+        workContext.drawImage(state.source, 0, 0, state.width, state.height);
+        state.frame = workContext.getImageData(0, 0, state.width, state.height);
+        process();
+        drawOverlay();
+        sendFrame();
+        sendStatus();
+        state.ticks.push(started); while (state.ticks.length && started - state.ticks[0] > 2000) state.ticks.shift();
+      } catch (error) {
+        if (!state.loopErrorShown) { state.loopErrorShown = true; Live.toast('讀取相機畫面失敗：' + (error && error.message || error), 'bad'); }
+      }
     }
     setTimeout(tick, Math.max(15, TICK_MS - (performance.now() - started)));
   }

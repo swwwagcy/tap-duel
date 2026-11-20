@@ -40,7 +40,8 @@ const card = (socket, table, zone, value) => socket.send(JSON.stringify({ t: 'zo
   await until(async () => { try { return (await fetch(BASE + '/health')).ok; } catch (error) { return false; } }, 'server start');
   step('server started');
 
-  browser = await chromium.launch();
+  // A fake webcam, so the reader's real camera path (getUserMedia) is exercised too.
+  browser = await chromium.launch({ args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] });
   const host = await (await browser.newContext({ viewport: { width: 1180, height: 820 } })).newPage();
   const viewer = await (await browser.newContext({ viewport: { width: 390, height: 844 } })).newPage();
   const errors = [];
@@ -116,6 +117,24 @@ const card = (socket, table, zone, value) => socket.send(JSON.stringify({ t: 'zo
   await until(async () => (await points()) === 10900, 'cancel returns the 500');
   step('manual correction wins over the camera; cancelling returns every point');
   reader.close();
+
+  /* The real camera path: start the (fake) webcam and take the empty table from another mode. */
+  const cameraContext = await browser.newContext({ viewport: { width: 1000, height: 900 } });
+  await cameraContext.grantPermissions(['camera']);
+  const cameraPage = await cameraContext.newPage();
+  cameraPage.on('pageerror', error => errors.push(error.message));
+  await cameraPage.goto(BASE + '/reader.html#key=' + KEY);
+  await until(() => cameraPage.evaluate(() => document.querySelectorAll('#tableTabs button').length === 2), 'camera reader tabs');
+  await cameraPage.click('#modeTabs button[data-mode="zones"]');
+  assert.ok(await cameraPage.isVisible('#captureEmpty'), 'the empty-table button is visible while adjusting positions');
+  await cameraPage.click('#startCamera');
+  await until(() => cameraPage.evaluate(() => !document.getElementById('captureEmpty').disabled && !!window.__readerState.frame), 'camera picture ready', 10000);
+  await cameraPage.click('#captureEmpty');
+  assert.ok(await cameraPage.evaluate(() => !!window.__readerState.empty && window.__readerState.width > 0), 'empty table captured from the positions mode');
+  await cameraPage.click('#modeTabs button[data-mode="deck"]');
+  assert.ok(await cameraPage.evaluate(() => document.getElementById('deckPrompt').textContent.includes('放進任一牌位')), 'deck mode is ready once the empty table is taken');
+  await cameraContext.close();
+  step('real camera path: webcam starts, empty table taken while adjusting positions, deck mode ready');
 
   /* Round 4: the real reader page reads cards from a synthetic camera. */
   const readerPage = await (await browser.newContext({ viewport: { width: 1100, height: 900 } })).newPage();
