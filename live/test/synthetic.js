@@ -1,7 +1,6 @@
 // Synthetic table and cards for recognizer tests (runs in the browser).
 (function () {
   var SUITS = ['S', 'H', 'D', 'C'], RANKS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
-  var SYMBOL = { S: '♠', H: '♥', D: '♦', C: '♣' };
   var W = 640, H = 360;
   var seed = 12345;
   function random() { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; }

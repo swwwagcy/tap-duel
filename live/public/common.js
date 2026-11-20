@@ -5,7 +5,6 @@
 
   // Demo mode runs the server inside the browser: on GitHub Pages, from a file, or with ?demo.
   Live.demo = /\.github\.io$/.test(location.hostname) || /[?&]demo\b/.test(location.search) || location.protocol === 'file:';
-  Live.DEMO_OPTIONS = { staffKeyMatches: function () { return true; }, bots: 5, tableSettings: { openSeconds: 12, waitSeconds: 2, auto: true } };
 
   Live.PHASE = { idle: '待開始', open: '選擇中', closed: '已截止', dealing: '出牌中', result: '結果', void: '已取消' };
 
@@ -54,7 +53,7 @@
       transport = { post: function (message) { worker.port.postMessage(message); }, close: function () { worker.port.postMessage({ t: 'bye' }); } };
       window.addEventListener('pagehide', function () { transport.close(); });
     } else {
-      if (!Live.localEngine) Live.localEngine = Engine.createEngine(Live.DEMO_OPTIONS);
+      if (!Live.localEngine) Live.localEngine = Engine.createEngine(Engine.DEMO_OPTIONS);
       Live.demoAlone = true;
       transport = overEngine(Live.localEngine);
     }

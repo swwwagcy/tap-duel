@@ -183,5 +183,5 @@ gcloud run services delete tap-duel-live --region asia-east1
 - **觀眾很多時有人連不上**：確認部署時有 `--concurrency 1000`，到 Cloud Console 的服務詳細資料看「每個執行個體的並行要求上限」。
 - **主持台和觀眾看到的回合不一樣**：最大執行個體數不是 1，重新部署並確認 `--max-instances 1`。
 - **讀牌器開不了相機**：要用 `https://` 開頭的網址，並在瀏覽器允許相機權限；iPhone 請用 Safari。
-- **主持台一直要求輸入密碼**：Secret 的權限（第 3 步）沒設好時，伺服器會用自己產生的隨機密碼，log 裡會出現 `STAFF_KEY is not set`。
+- **主持台說密碼不對**：依序檢查。①第 3 步的 `你的密碼` 有沒有被原樣貼上（那密碼就是這四個中文字）。②`gcloud run services logs read tap-duel-live --region asia-east1 --limit 200 | grep -i STAFF_KEY`，出現 `STAFF_KEY is not set` 代表伺服器沒拿到密碼，改用了同一行印出的隨機密碼，通常是第 3-2 步的授權沒成功。③`gcloud secrets versions access latest --secret=tap-duel-staff-key | od -c` 看結尾有沒有 `\n` 或空白。最快的解法是重設成只有英文數字的密碼：`gcloud run services update tap-duel-live --region asia-east1 --remove-secrets STAFF_KEY --update-env-vars STAFF_KEY=新密碼`，再開 `host.html#key=新密碼` 覆蓋裝置記住的舊值。用中文輸入法時注意要輸入半形英數字。
 - **部署時 Cloud Build 權限錯誤**：較新的專案預設不給 Cloud Build 足夠權限，錯誤訊息會指出缺哪個角色，請專案擁有者授予後重跑。

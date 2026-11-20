@@ -1,7 +1,7 @@
 // Demo mode: the game engine running in a shared worker, so every tab of this browser on this site
 // (viewer, host, reader) talks to the same tables, exactly as they would talk to the real server.
 importScripts('games.js', 'engine.js');
-var engine = Engine.createEngine({ staffKeyMatches: function () { return true; }, bots: 5, tableSettings: { openSeconds: 12, waitSeconds: 2, auto: true } });
+var engine = Engine.createEngine(Engine.DEMO_OPTIONS);
 self.onconnect = function (event) {
   var port = event.ports[0];
   var connection = { deliver: function (message) { port.postMessage(message); } };

@@ -34,7 +34,7 @@ STAFF_KEY=自己定一組密碼 npm start
 # 打開 http://localhost:8080
 ```
 
-沒設 `STAFF_KEY` 時，伺服器會產生一組並印在 log 裡。主持台與讀牌器要輸入這組密碼；也可以用 `host.html#key=密碼` 開一次，之後就記在那台裝置上。
+沒設 `STAFF_KEY` 時，伺服器會產生一組並印在 log 裡。設 `DEMO_VIEWERS=5` 可以在正式伺服器上也加入最多 8 位隨機參與的示範觀眾（預設 0）。主持台與讀牌器要輸入這組密碼；也可以用 `host.html#key=密碼` 開一次，之後就記在那台裝置上。
 
 讀牌器要開相機，瀏覽器只允許 HTTPS 或 `localhost`，所以實機測試請用部署後的網址。
 
@@ -97,10 +97,11 @@ STAFF_KEY=自己定一組密碼 npm start
 ## 測試
 
 ```bash
-npm test                         # 兩款遊戲的規則與點數計算
-node test/recognizer.test.js     # 光學辨識準確度（合成牌）
-node test/e2e.test.js            # 啟動伺服器，瀏覽器跑完整回合，最後一回合由讀牌器頁面看合成攝影機畫面
-node test/demo.test.js           # 只用靜態檔案（像 GitHub Pages）跑示範模式的兩款遊戲與分頁共用
+npm test                   # 兩款遊戲的規則與點數計算
+npm run test:recognizer    # 光學辨識準確度（合成牌）
+npm run test:e2e           # 啟動伺服器，瀏覽器跑完整回合，最後一回合由讀牌器頁面看合成攝影機畫面
+npm run test:demo          # 只用靜態檔案（像 GitHub Pages）跑示範模式的兩款遊戲與分頁共用
+npm run test:all           # 以上全部
 ```
 
 ## 這個 prototype 沒有做的

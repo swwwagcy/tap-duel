@@ -420,16 +420,6 @@
       })
     };
   }
-  // Reading the same resting card in several frames: sure only if every frame is sure of the same card.
-  function combine(results) {
-    var first = results[0];
-    var same = results.every(function (result) { return result.card === first.card; });
-    var sure = same && results.every(function (result) { return result.sure; });
-    var score = Math.min.apply(null, results.map(function (result) { return result.score; }));
-    var margin = Math.min.apply(null, results.map(function (result) { return result.margin; }));
-    return { card: first.card, score: score, margin: margin, top: first.top, sure: sure, frames: results.length, agreeFrames: same };
-  }
-
   // Raw grey values <-> compact text for storage.
   function encodeRaw(raw) {
     var bytes = new Uint8Array(raw.full.length + raw.corner.length);
@@ -450,6 +440,6 @@
     DEFAULTS: DEFAULTS, FULL_W: FULL_W, FULL_H: FULL_H,
     signature: signature, coverage: coverage, motion: motion, locate: locate,
     describeRaw: describeRaw, buildModel: buildModel, describeProbe: describeProbe,
-    match: match, combine: combine, averageRaw: averageRaw, averageProbe: averageProbe, redThreshold: redThreshold, encodeRaw: encodeRaw, decodeRaw: decodeRaw
+    match: match, averageRaw: averageRaw, averageProbe: averageProbe, redThreshold: redThreshold, encodeRaw: encodeRaw, decodeRaw: decodeRaw
   };
 });

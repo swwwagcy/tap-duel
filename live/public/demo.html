@@ -51,7 +51,7 @@
   </div>
   <ol class="steps">
     <li><b>主持台</b>按「開始新回合」，觀眾有 12 秒可以選擇（另有 5 位示範觀眾會隨機參與）。</li>
-    <li><b>觀眾</b>選籌碼、點格子投入點數。</li>
+    <li><b>觀眾</b>選點數面額，再點格子投入。</li>
     <li>截止後，<b>讀牌器</b>的模擬攝影機會自動把牌放到該出牌的位置並辨識。</li>
     <li><b>主持台</b>核對讀到的牌，按「確認結果」結算；認不出來的牌點牌位手動選。</li>
   </ol>
@@ -74,7 +74,7 @@
 (function () {
   'use strict';
   // This page owns the demo engine; the three frames below connect to it directly.
-  window.__demoEngine = Engine.createEngine(Live.DEMO_OPTIONS);
+  window.__demoEngine = Engine.createEngine(Engine.DEMO_OPTIONS);
   var table = (/[?&]table=(\w+)/.exec(location.search) || [])[1] || 'duel';
   function load() {
     var query = '?demo&table=' + table;

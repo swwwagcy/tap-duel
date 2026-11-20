@@ -495,5 +495,9 @@
     };
   }
 
-  return { createEngine: createEngine };
+  // Settings for demo mode (in the browser, no staff key, a few demo viewers, faster rounds).
+  // demo-worker.js and demo.html both use this one copy.
+  const DEMO_OPTIONS = { staffKeyMatches: function () { return true; }, bots: 5, tableSettings: { openSeconds: 12, waitSeconds: 2, auto: true } };
+
+  return { createEngine: createEngine, DEMO_OPTIONS: DEMO_OPTIONS };
 });

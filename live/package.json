@@ -6,7 +6,11 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node test/rules.test.js"
+    "test": "node test/rules.test.js",
+    "test:recognizer": "node test/recognizer.test.js",
+    "test:e2e": "node test/e2e.test.js",
+    "test:demo": "node test/demo.test.js",
+    "test:all": "node test/rules.test.js && node test/recognizer.test.js && node test/e2e.test.js && node test/demo.test.js"
   },
   "engines": { "node": ">=20" },
   "dependencies": {
