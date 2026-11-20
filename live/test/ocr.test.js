@@ -29,6 +29,33 @@ const PUBLIC = path.join(__dirname, '..', 'public');
     if (corner.card !== expected || !clear) failed = true;
   }
 
+  // The four aces photographed on a tan table, at four sizes: found, straightened and read whole.
+  // (The centre artwork is blanked in the stored picture.) They used to fail three ways: the card
+  // was mislocated where it lay in shade, the pale teal diamond was taken for paper, and the club
+  // was read as a spade.
+  {
+    const source = 'data:image/jpeg;base64,' + fs.readFileSync(path.join(__dirname, 'fixtures', 'real-aces.jpg')).toString('base64');
+    for (const scale of [1, 0.75, 0.55, 0.4]) {
+      const rows = await page.evaluate(async ([source, scale]) => {
+        const image = new Image(); image.src = source; await image.decode();
+        const canvas = document.createElement('canvas'); canvas.width = Math.round(image.width * scale); canvas.height = Math.round(image.height * scale);
+        const context = canvas.getContext('2d'); context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        const frame = context.getImageData(0, 0, canvas.width, canvas.height), W = canvas.width, H = canvas.height;
+        const zones = { CA: [0.05, 0.12, 0.43, 0.42], DA: [0.47, 0.12, 0.43, 0.42], SA: [0.05, 0.55, 0.43, 0.43], HA: [0.47, 0.55, 0.43, 0.43] };
+        return Object.keys(zones).map(card => {
+          const z = zones[card], rect = { x: z[0] * W, y: z[1] * H, w: z[2] * W, h: z[3] * H };
+          const at = ((Math.round(rect.y) + 3) * W + Math.round(rect.x) + 3) * 4;
+          const found = Recognizer.locate(frame, { colour: [frame.data[at], frame.data[at + 1], frame.data[at + 2]] }, rect);
+          const reading = found ? CardOCR.read(frame, found) : { card: null, sure: false };
+          return { card, read: reading.card, sure: reading.sure, height: found ? Math.round(found.h) : 0 };
+        });
+      }, [source, scale]);
+      const wrong = rows.filter(row => row.sure && row.read !== row.card), right = rows.filter(row => row.sure && row.read === row.card);
+      console.log(`real aces at ${rows[0].height}px: ${right.length}/4 read` + (wrong.length ? ', WRONG ' + wrong.map(row => row.card + '→' + row.read).join(' ') : '') + (right.length < 4 ? ', left to the host: ' + rows.filter(row => !row.sure).map(row => row.card + (row.read ? '(' + row.read + '?)' : '')).join(' ') : ''));
+      if (wrong.length || right.length < 3) failed = true;
+    }
+  }
+
   const decks = [
     ['standard', {}], ['teal diamonds', { palette: { D: '#11a99a' } }], ['four colours', { palette: { D: '#1f5fd0', C: '#1b8a3a' } }],
     ['serif index', { font: 'DejaVu Serif, Georgia, serif' }], ['monospace index', { font: 'DejaVu Sans Mono, monospace' }]

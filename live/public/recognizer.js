@@ -69,27 +69,22 @@
     var x1 = Math.min(frame.width - 1, Math.ceil(rect.x + rect.w)), y1 = Math.min(frame.height - 1, Math.ceil(rect.y + rect.h));
     var W = x1 - x0 + 1, H = y1 - y0 + 1;
     if (W < 8 || H < 8) return null;
-    // Two masks in one pass: pixels brighter than the empty table (ignores the card's shadow), and
-    // pixels that differ from it in any way. The second is the fallback for a light table, where a
-    // white card is barely brighter than what it lies on.
-    var bright = new Uint8Array(W * H), any = new Uint8Array(W * H);
-    var brightColumns = new Int32Array(W), brightRows = new Int32Array(H), anyColumns = new Int32Array(W), anyRows = new Int32Array(H);
+    // The card is whatever differs from the table, except the table's own shadow: a pixel that is
+    // only darker than the table, by about the same share in every colour. (Judging by brightness
+    // alone fails when part of a white card lies in shade on a light table.) Dark printing on the
+    // card is nothing like a shadow, so the card comes out whole.
+    var mask = new Uint8Array(W * H), columns = new Int32Array(W), rows = new Int32Array(H);
     var nowPixel = [0, 0, 0], emptyPixel = [0, 0, 0];
     for (var y = 0; y < H; y++) for (var x = 0; x < W; x++) {
       rgbAt(frame, x0 + x, y0 + y, nowPixel); rgbAt(empty, x0 + x, y0 + y, emptyPixel);
-      var lift = (0.299 * (nowPixel[0] - emptyPixel[0]) + 0.587 * (nowPixel[1] - emptyPixel[1]) + 0.114 * (nowPixel[2] - emptyPixel[2]));
       var change = Math.abs(nowPixel[0] - emptyPixel[0]) + Math.abs(nowPixel[1] - emptyPixel[1]) + Math.abs(nowPixel[2] - emptyPixel[2]);
-      if (lift > 30) { bright[y * W + x] = 1; brightColumns[x]++; brightRows[y]++; }
-      if (change > 60) { any[y * W + x] = 1; anyColumns[x]++; anyRows[y]++; }
+      if (change <= 45) continue;
+      var r0 = (nowPixel[0] + 8) / (emptyPixel[0] + 8), r1 = (nowPixel[1] + 8) / (emptyPixel[1] + 8), r2 = (nowPixel[2] + 8) / (emptyPixel[2] + 8);
+      var low = Math.min(r0, r1, r2), high = Math.max(r0, r1, r2);
+      if (high <= 1.02 && low >= 0.4 && high - low < 0.14) continue;      // shadow on the table
+      mask[y * W + x] = 1; columns[x]++; rows[y]++;
     }
-    var brightCount = 0, anyCount = 0;
-    for (var cell = 0; cell < bright.length; cell++) { brightCount += bright[cell]; anyCount += any[cell]; }
-    var mask = bright, spanX = longestRun(brightColumns), spanY = longestRun(brightRows), lightTable = false;
-    // On a light table only part of the card clears the brightness bar; when far fewer pixels are
-    // brighter than are different, the brighter set is a fragment of the card, not the card.
-    if (!spanX || !spanY || (spanX[1] - spanX[0]) * (spanY[1] - spanY[0]) < 60 || brightCount < anyCount * 0.6) {
-      mask = any; spanX = longestRun(anyColumns); spanY = longestRun(anyRows); lightTable = true;
-    }
+    var spanX = longestRun(columns), spanY = longestRun(rows), lightTable = false;
     if (!spanX || !spanY) return null;
     var count = 0, sumX = 0, sumY = 0;
     for (y = spanY[0]; y <= spanY[1]; y++) for (x = spanX[0]; x <= spanX[1]; x++) if (mask[y * W + x]) { count++; sumX += x; sumY += y; }

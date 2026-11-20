@@ -97,6 +97,38 @@
   }
   function union(a, b) { return { x0: Math.min(a.x0, b.x0), y0: Math.min(a.y0, b.y0), x1: Math.max(a.x1, b.x1), y1: Math.max(a.y1, b.y1), area: a.area + b.area }; }
 
+  // The outline of a suit symbol, measured row by row on a 24 x 24 grid. Used to tell apart the
+  // pairs that look alike as pictures: a club has a round head with a waist under it where a spade
+  // just widens from its point; a heart has two bumps on top where a diamond has a point; clubs and
+  // spades stand on a foot that spreads, hearts and diamonds end in a point.
+  var SHAPE = 24;
+  function suitShape(ink, width, box) {
+    var bw = box.x1 - box.x0 + 1, bh = box.y1 - box.y0 + 1, widths = [], runs = [];
+    for (var gy = 0; gy < SHAPE; gy++) {
+      var row = [], y = Math.min(box.y1, Math.floor(box.y0 + (gy + 0.5) * bh / SHAPE));
+      for (var gx = 0; gx < SHAPE; gx++) row.push(ink[y * width + Math.min(box.x1, Math.floor(box.x0 + (gx + 0.5) * bw / SHAPE))]);
+      var count = 0, pieces = 0;
+      for (gx = 0; gx < SHAPE; gx++) { if (row[gx]) { count++; if (!gx || !row[gx - 1]) pieces++; } }
+      widths.push(count / SHAPE); runs.push(pieces);
+    }
+    var widest = Math.max.apply(null, widths) || 1, headAt = 0, index;
+    for (index = 0; index < 10; index++) if (widths[index] > widths[headAt]) headAt = index;
+    var waist = widths[headAt];
+    for (index = headAt; index < 15; index++) if (widths[index] < waist) waist = widths[index];
+    var ankle = 1, foot = 0;
+    for (index = 15; index < 21; index++) if (widths[index] < ankle) ankle = widths[index];
+    for (index = 21; index < SHAPE; index++) if (widths[index] > foot) foot = widths[index];
+    var top = (widths[2] + widths[3] + widths[4]) / 3 / widest;
+    return {
+      waist: waist / (widths[headAt] || 1),            // below 1: narrows under the head (club)
+      foot: foot / (ankle || 0.01),                    // above 1: spreads at the bottom (club, spade)
+      top: top,                                        // how wide the top is (heart wide, diamond narrow)
+      bumps: Math.max(runs[1], runs[2], runs[3]),      // 2: two bumps on top (heart)
+      head: widths[2] / widest,                        // how blunt the very top is (club round, spade pointed)
+      widths: widths
+    };
+  }
+
   /* ---------------- references ---------------- */
 
   var FONTS = ['Arial, Helvetica, sans-serif', 'Georgia, "Times New Roman", serif', '"Courier New", monospace', 'Impact, "Arial Narrow", sans-serif', 'Verdana, sans-serif'];
@@ -129,7 +161,7 @@
   }
   // The four suits drawn as plain shapes, so reading does not depend on which fonts a phone has.
   function drawnSuit(suit, variant) {
-    var sheet = blank(160), c = sheet.context, plump = variant ? 1.12 : 1;
+    var sheet = blank(160), c = sheet.context, plump = variant === 1 ? 1.12 : 1;
     c.translate(80, 80); c.scale(plump, 1);
     function heart(flip) {
       c.save(); if (flip) c.scale(1, -1);
@@ -142,7 +174,12 @@
     if (suit === 'H') heart(false);
     else if (suit === 'D') { c.beginPath(); c.moveTo(0, -54); c.quadraticCurveTo(18, -22, 40, 0); c.quadraticCurveTo(18, 22, 0, 54); c.quadraticCurveTo(-18, 22, -40, 0); c.quadraticCurveTo(-18, -22, 0, -54); c.fill(); }
     else if (suit === 'S') { c.translate(0, -8); heart(true); stem(); }
-    else { [[0, -28], [-26, 8], [26, 8]].forEach(function (p) { c.beginPath(); c.arc(p[0], p[1], 22, 0, Math.PI * 2); c.fill(); }); c.fillRect(-6, -8, 12, 20); stem(); }
+    else {
+      // Clubs vary most between decks: thin separate lobes, or fat ones that run together.
+      var lobe = [22, 22, 27, 31][variant], spread = [26, 26, 24, 22][variant];
+      [[0, -28], [-spread, 8], [spread, 8]].forEach(function (p) { c.beginPath(); c.arc(p[0], p[1], lobe, 0, Math.PI * 2); c.fill(); });
+      c.fillRect(-6, -8, 12, 20); stem();
+    }
     return inkOf(sheet.canvas);
   }
   function build() {
@@ -152,7 +189,7 @@
       FONTS.forEach(function (font) { ['400', '700'].forEach(function (weight) { var vector = drawnText(rank, font, weight); if (vector) ranks.push({ key: rank, vector: vector }); }); });
     });
     SUITS.forEach(function (suit) {
-      [0, 1].forEach(function (variant) { suits.push({ key: suit, vector: drawnSuit(suit, variant) }); });
+      (suit === 'C' ? [0, 1, 2, 3] : [0, 1]).forEach(function (variant) { suits.push({ key: suit, vector: drawnSuit(suit, variant) }); });
       ['Arial, sans-serif', 'Georgia, serif'].forEach(function (font) { var vector = drawnText(symbols[suit], font, '400'); if (vector) suits.push({ key: suit, vector: vector }); });
     });
     references = { ranks: ranks, suits: suits };
@@ -203,9 +240,19 @@
     paper = paper.map(function (value) { return value / count; });
     var distance = new Float32Array(luma.length);
     for (at = 0; at < luma.length; at++) distance[at] = Math.min(255, (Math.abs(colours[at * 3] - paper[0]) + Math.abs(colours[at * 3 + 1] - paper[1]) + Math.abs(colours[at * 3 + 2] - paper[2])) / 2);
-    var threshold = Math.max(28, otsu(distance));
-    var ink = new Uint8Array(luma.length);
-    for (at = 0; at < luma.length; at++) ink[at] = distance[at] > threshold ? 1 : 0;
+    // Cut twice: at the usual split between paper and ink, and with a much lower bar, because pale
+    // printing (a light teal suit next to a black rank) falls on the paper side of the usual split.
+    // The clearer of the two readings is kept.
+    var split = otsu(distance);
+    var readings = [cut(distance, Math.max(28, split)), cut(distance, Math.max(30, Math.min(80, split * 0.45)))];
+    var clear = function (reading) { return reading.problem ? -1 : Math.min(reading.rank.score, reading.suit.score) + 0.5 * Math.max(0, Math.min(reading.rank.margin, reading.suit.margin, 1)); };
+    return clear(readings[1]) > clear(readings[0]) ? readings[1] : readings[0];
+  }
+
+  // Cuts the rank and suit out of the corner at one ink threshold and classifies them.
+  function cut(distance, threshold) {
+    var ink = new Uint8Array(distance.length), at, index, piece;
+    for (at = 0; at < distance.length; at++) ink[at] = distance[at] > threshold ? 1 : 0;
 
     // Keep pieces that can be part of an index: not touching the card's edge (that is the table
     // showing round the rounded corner, or the zone frame), not specks, not long rules or frames.
@@ -221,8 +268,8 @@
 
     // The rank is the topmost piece, plus anything beside it on the same line (the two digits of 10).
     var rank = pieces[0], used = [0];
-    for (var index = 1; index < pieces.length; index++) {
-      var piece = pieces[index], overlap = Math.min(rank.y1, piece.y1) - Math.max(rank.y0, piece.y0) + 1;
+    for (index = 1; index < pieces.length; index++) {
+      piece = pieces[index]; var overlap = Math.min(rank.y1, piece.y1) - Math.max(rank.y0, piece.y0) + 1;
       var height = rank.y1 - rank.y0 + 1, gap = Math.max(piece.x0 - rank.x1, rank.x0 - piece.x1);
       if (overlap > 0.5 * Math.min(height, piece.y1 - piece.y0 + 1) && gap < height * 0.45) { rank = union(rank, piece); used.push(index); }
     }
@@ -247,7 +294,14 @@
     // Two separate pieces side by side can only be a 10; a single piece can never be one.
     var parts = used.length;
     if (parts >= 2 && rankRead.key !== '10') { rankRead = { key: '10', score: Math.max(0.7, rankRead.score), margin: 0.5, second: rankRead.key }; }
-    return { rank: rankRead, suit: suitRead, card: suitRead.key + rankRead.key, boxes: { rank: rank, suit: suit } };
+    var shape = suitShape(ink, CORNER_W, suit);
+    // The outline has a say where pictures are close: a blunt round top cannot be a spade, a sharp
+    // point cannot be a club, two bumps on top can only be a heart. A contradiction leaves the suit
+    // unsettled instead of trusting either.
+    var odd = (suitRead.key === 'S' && shape.head >= 0.45) || (suitRead.key === 'C' && shape.head <= 0.28) ||
+      (suitRead.key === 'D' && shape.bumps >= 2 && shape.top > 0.7) || (suitRead.key === 'H' && shape.top < 0.45);
+    if (odd) suitRead = { key: suitRead.key, score: suitRead.score, margin: 0, second: suitRead.second };
+    return { rank: rankRead, suit: suitRead, shape: shape, card: suitRead.key + rankRead.key, boxes: { rank: rank, suit: suit } };
   }
 
   // Share of the card's inside that is printed. A face shows mostly paper; a back is a pattern
