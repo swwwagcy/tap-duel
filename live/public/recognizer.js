@@ -82,10 +82,54 @@
       var r0 = (nowPixel[0] + 8) / (emptyPixel[0] + 8), r1 = (nowPixel[1] + 8) / (emptyPixel[1] + 8), r2 = (nowPixel[2] + 8) / (emptyPixel[2] + 8);
       var low = Math.min(r0, r1, r2), high = Math.max(r0, r1, r2);
       if (high <= 1.02 && low >= 0.4 && high - low < 0.14) continue;      // shadow on the table
+      // On a clearly coloured table, a patch that is the table's own hue but lit more strongly is
+      // still table (light falls unevenly across a mat). Not applied to grey, white or black tables,
+      // where a white card is itself just a brighter version of the table.
+      var tableMax = Math.max(emptyPixel[0], emptyPixel[1], emptyPixel[2]), tableMin = Math.min(emptyPixel[0], emptyPixel[1], emptyPixel[2]);
+      if (tableMax > 60 && (tableMax - tableMin) / tableMax > 0.15 && high <= 1.6 && low >= 0.4 && high - low < 0.25) continue;
       mask[y * W + x] = 1; columns[x]++; rows[y]++;
     }
-    var spanX = longestRun(columns), spanY = longestRun(rows), lightTable = false;
-    if (!spanX || !spanY) return null;
+    // Other things in the frame also differ from the table (the edge of the mat, a hand, the next
+    // card). Split what was found into separate pieces and keep the one that is most like a card:
+    // big, compact, and not running out of the frame. Everything else is dropped.
+    var lightTable = false, cell = Math.max(1, Math.ceil(Math.max(W, H) / 110));
+    var gridW = Math.ceil(W / cell), gridH = Math.ceil(H / cell), grid = new Uint8Array(gridW * gridH), fill = new Uint16Array(gridW * gridH);
+    for (y = 0; y < H; y++) for (x = 0; x < W; x++) if (mask[y * W + x]) fill[((y / cell) | 0) * gridW + ((x / cell) | 0)]++;
+    for (var g = 0; g < grid.length; g++) grid[g] = fill[g] * 2 >= cell * cell ? 1 : 0;
+    var labels = new Int32Array(gridW * gridH), pieces = [], stack = [];
+    for (g = 0; g < grid.length; g++) {
+      if (!grid[g] || labels[g]) continue;
+      var piece = { id: pieces.length + 1, area: 0, x0: gridW, y0: gridH, x1: -1, y1: -1, edge: 0 };
+      stack.push(g); labels[g] = piece.id;
+      while (stack.length) {
+        var here = stack.pop(), gx = here % gridW, gy = (here - gx) / gridW;
+        piece.area++;
+        if (gx < piece.x0) piece.x0 = gx; if (gx > piece.x1) piece.x1 = gx; if (gy < piece.y0) piece.y0 = gy; if (gy > piece.y1) piece.y1 = gy;
+        if (gx === 0 || gy === 0 || gx === gridW - 1 || gy === gridH - 1) piece.edge++;
+        if (gx > 0 && grid[here - 1] && !labels[here - 1]) { labels[here - 1] = piece.id; stack.push(here - 1); }
+        if (gx < gridW - 1 && grid[here + 1] && !labels[here + 1]) { labels[here + 1] = piece.id; stack.push(here + 1); }
+        if (gy > 0 && grid[here - gridW] && !labels[here - gridW]) { labels[here - gridW] = piece.id; stack.push(here - gridW); }
+        if (gy < gridH - 1 && grid[here + gridW] && !labels[here + gridW]) { labels[here + gridW] = piece.id; stack.push(here + gridW); }
+      }
+      pieces.push(piece);
+    }
+    var chosen = null, bestScore = 0;
+    pieces.forEach(function (candidate) {
+      var boxArea = (candidate.x1 - candidate.x0 + 1) * (candidate.y1 - candidate.y0 + 1);
+      if (candidate.area < grid.length * 0.03) return;
+      var compact = candidate.area / boxArea;                                        // a card fills its own outline
+      var outside = candidate.edge / (2 * (candidate.x1 - candidate.x0 + candidate.y1 - candidate.y0 + 2));   // share of its outline on the frame's edge
+      var score = candidate.area * compact * (outside > 0.2 ? 0.25 : 1);
+      if (score > bestScore) { bestScore = score; chosen = candidate; }
+    });
+    if (!chosen) return null;
+    for (y = 0; y < H; y++) for (x = 0; x < W; x++) {
+      if (!mask[y * W + x]) continue;
+      var gx2 = (x / cell) | 0, gy2 = (y / cell) | 0, keep = false;
+      for (var ny = Math.max(0, gy2 - 1); ny <= Math.min(gridH - 1, gy2 + 1) && !keep; ny++) for (var nx = Math.max(0, gx2 - 1); nx <= Math.min(gridW - 1, gx2 + 1); nx++) if (labels[ny * gridW + nx] === chosen.id) { keep = true; break; }
+      if (!keep) mask[y * W + x] = 0;
+    }
+    var spanX = [Math.max(0, (chosen.x0 - 1) * cell), Math.min(W - 1, (chosen.x1 + 2) * cell - 1)], spanY = [Math.max(0, (chosen.y0 - 1) * cell), Math.min(H - 1, (chosen.y1 + 2) * cell - 1)];
     var count = 0, sumX = 0, sumY = 0;
     for (y = spanY[0]; y <= spanY[1]; y++) for (x = spanX[0]; x <= spanX[1]; x++) if (mask[y * W + x]) { count++; sumX += x; sumY += y; }
     if (count < 60) return null;

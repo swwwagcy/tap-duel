@@ -56,10 +56,47 @@ const PUBLIC = path.join(__dirname, '..', 'public');
     }
   }
 
+  // The two of clubs on a mat lit unevenly, with a white desk beside the mat. Framed tightly and
+  // framed so widely that the desk is inside the frame: it was once taken for a face-down card,
+  // because the desk was measured as part of the card.
+  {
+    const source = 'data:image/jpeg;base64,' + fs.readFileSync(path.join(__dirname, 'fixtures', 'real-two-clubs.jpg')).toString('base64');
+    for (const [name, zone] of [['framed closely', [0.2, 0.28, 0.55, 0.5]], ['frame includes the desk', [0.05, 0.25, 0.93, 0.55]]]) for (const scale of [1, 0.6]) {
+      const reading = await page.evaluate(async ([source, scale, z]) => {
+        const image = new Image(); image.src = source; await image.decode();
+        const canvas = document.createElement('canvas'); canvas.width = Math.round(image.width * scale); canvas.height = Math.round(image.height * scale);
+        const context = canvas.getContext('2d'); context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        const frame = context.getImageData(0, 0, canvas.width, canvas.height), W = canvas.width, H = canvas.height;
+        const rect = { x: z[0] * W, y: z[1] * H, w: z[2] * W, h: z[3] * H }, at = ((Math.round(rect.y) + 3) * W + Math.round(rect.x) + 3) * 4;
+        const found = Recognizer.locate(frame, { colour: [frame.data[at], frame.data[at + 1], frame.data[at + 2]] }, rect);
+        const result = found ? CardOCR.read(frame, found) : { card: null, sure: false };
+        return { card: result.card, sure: result.sure, back: !!result.back, height: found ? Math.round(found.h) : 0 };
+      }, [source, scale, zone]);
+      console.log(`real two of clubs, ${name}, ${reading.height}px: ` + (reading.sure ? 'read ' + reading.card : reading.back ? 'taken for a BACK' : 'left to the host (' + reading.card + '?)'));
+      if (reading.back || (reading.sure && reading.card !== 'C2') || (scale === 1 && !reading.sure)) failed = true;
+    }
+  }
+
+  // Tables of other colours (52 cards each at 300px). White on white cannot work: there is no edge.
+  for (const [name, felt, rgb, floor] of [['off-white', '#ece6d8', [236, 230, 216], 42], ['light grey', '#d4d4d4', [212, 212, 212], 46], ['mid grey', '#b0b0b0', [176, 176, 176], 48], ['tan', '#c9a15a', [201, 161, 90], 46], ['black', '#141414', [20, 20, 20], 46]]) {
+    const summary = await page.evaluate(([felt, rgb]) => {
+      const camera = DemoCamera.source(1280, 720, { still: true, felt }), zone = { x: 380, y: 100, w: 400, h: 500 }, summary = { right: 0, wrong: 0, other: 0 };
+      Games.allCards().forEach((card, index) => {
+        const frame = camera.place([{ card, h: 300, x: 580 + (index % 5 - 2) * 10, y: 350, angle: (index % 7 - 3) * 0.02, flip: index % 2 === 1 }]);
+        const found = Recognizer.locate(frame, { colour: rgb }, zone), reading = found ? CardOCR.read(frame, found) : { sure: false };
+        if (!reading.sure) summary.other++; else if (reading.card === card) summary.right++; else summary.wrong++;
+      });
+      return summary;
+    }, [felt, rgb]);
+    console.log(`${name} table: ${summary.right}/52 read, wrong but sure ${summary.wrong}`);
+    if (summary.wrong || summary.right < floor) failed = true;
+  }
+
   const decks = [
     ['standard', {}], ['teal diamonds', { palette: { D: '#11a99a' } }], ['four colours', { palette: { D: '#1f5fd0', C: '#1b8a3a' } }],
     ['serif index', { font: 'DejaVu Serif, Georgia, serif' }], ['monospace index', { font: 'DejaVu Sans Mono, monospace' }]
   ];
+  const totals = { 200: 0, 280: 0 };
   for (const height of [200, 280]) for (const [name, options] of decks) {
     const summary = await page.evaluate(([height, options]) => {
       const camera = DemoCamera.source(1280, 720, Object.assign({ still: true }, options));
@@ -76,8 +113,13 @@ const PUBLIC = path.join(__dirname, '..', 'public');
       return summary;
     }, [height, options]);
     console.log(`${height}px ${name}: ${summary.right}/${summary.total} read, ${summary.unsure} left to the host, wrong but sure ${summary.wrong.length}` + (summary.wrong.length ? ' ' + summary.wrong.join(' ') : ''));
+    totals[height] += summary.right;
     if (summary.wrong.length || summary.right / summary.total < (height >= 280 ? 0.9 : 0.7)) failed = true;
   }
+  // Floors for the whole set (520 placements per size), a little under what the current reader
+  // scores (450 and 518 on 2026-11-20). A change that helps one card but costs the rest fails here.
+  console.log(`all decks: ${totals[200]}/520 at 200px, ${totals[280]}/520 at 280px`);
+  if (totals[200] < 440 || totals[280] < 510) { console.log('below the floor for the whole set (440 and 510)'); failed = true; }
   await browser.close();
   if (failed) { console.log('FAILED'); process.exit(1); }
   console.log('ocr ok');

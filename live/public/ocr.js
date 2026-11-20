@@ -304,34 +304,46 @@
     return { rank: rankRead, suit: suitRead, shape: shape, card: suitRead.key + rankRead.key, boxes: { rank: rank, suit: suit } };
   }
 
-  // Share of the card's inside that is printed. A face shows mostly paper; a back is a pattern
-  // from edge to edge.
-  function printedShare(frame, card) {
-    var cos = Math.cos(card.angle), sin = Math.sin(card.angle), pixel = [0, 0, 0], samples = [], brightest = 0;
-    for (var j = 0; j < 40; j++) for (var i = 0; i < 28; i++) {
-      var lx = ((i + 0.5) / 28 - 0.5) * card.w * 0.8, ly = ((j + 0.5) / 40 - 0.5) * card.h * 0.84;
+  // Does the card look like a back? Two signs, both unaffected by light falling unevenly across
+  // the card (a face lying half in shade must not count as printed all over):
+  //   pattern: share of the inside that differs from the lightest part of its own neighbourhood;
+  //   solid:   the inside as a whole is another colour than the card's rim.
+  function backSigns(frame, card) {
+    var cos = Math.cos(card.angle), sin = Math.sin(card.angle), pixel = [0, 0, 0];
+    function at(u, v) {       // u, v in -0.5..0.5 across the card
+      var lx = u * card.w, ly = v * card.h;
       rgbAt(frame, card.cx + lx * cos - ly * sin, card.cy + lx * sin + ly * cos, pixel);
-      var luma = 0.299 * pixel[0] + 0.587 * pixel[1] + 0.114 * pixel[2];
-      samples.push([pixel[0], pixel[1], pixel[2], luma]);
-      if (luma > brightest) brightest = luma;
+      return [pixel[0], pixel[1], pixel[2], 0.299 * pixel[0] + 0.587 * pixel[1] + 0.114 * pixel[2]];
     }
-    var paper = [0, 0, 0], count = 0;
-    samples.forEach(function (sample) { if (sample[3] >= brightest * 0.9) { paper[0] += sample[0]; paper[1] += sample[1]; paper[2] += sample[2]; count++; } });
-    paper = paper.map(function (value) { return value / count; });
-    var printed = 0;
-    samples.forEach(function (sample) { if (Math.abs(sample[0] - paper[0]) + Math.abs(sample[1] - paper[1]) + Math.abs(sample[2] - paper[2]) > 70) printed++; });
-    return printed / samples.length;
+    var COLS = 28, ROWS = 40, BLOCK_W = 7, BLOCK_H = 8, grid = [], printed = 0, i, j;
+    for (j = 0; j < ROWS; j++) for (i = 0; i < COLS; i++) grid.push(at(((i + 0.5) / COLS - 0.5) * 0.8, ((j + 0.5) / ROWS - 0.5) * 0.84));
+    for (var by = 0; by < ROWS; by += BLOCK_H) for (var bx = 0; bx < COLS; bx += BLOCK_W) {
+      var block = [];
+      for (j = by; j < by + BLOCK_H; j++) for (i = bx; i < bx + BLOCK_W; i++) block.push(grid[j * COLS + i]);
+      var light = block.slice().sort(function (a, b) { return b[3] - a[3]; }).slice(0, block.length >> 2), paper = [0, 0, 0];
+      light.forEach(function (sample) { paper[0] += sample[0] / light.length; paper[1] += sample[1] / light.length; paper[2] += sample[2] / light.length; });
+      block.forEach(function (sample) { if (Math.abs(sample[0] - paper[0]) + Math.abs(sample[1] - paper[1]) + Math.abs(sample[2] - paper[2]) > 60) printed++; });
+    }
+    function middle(samples) {
+      return [0, 1, 2].map(function (channel) { var values = samples.map(function (sample) { return sample[channel]; }).sort(function (a, b) { return a - b; }); return values[values.length >> 1]; });
+    }
+    var rim = [];
+    for (i = 0; i < 24; i++) { var along = (i + 0.5) / 24 - 0.5; rim.push(at(along * 0.9, -0.465), at(along * 0.9, 0.465), at(-0.455, along * 0.9), at(0.455, along * 0.9)); }
+    var rimColour = middle(rim), inside = middle(grid);
+    var apart = Math.abs(rimColour[0] - inside[0]) + Math.abs(rimColour[1] - inside[1]) + Math.abs(rimColour[2] - inside[2]);
+    return { pattern: printed / grid.length, solid: apart > 90 };
   }
 
   // Reads both corner indexes. sure: both corners give the same card, each clearly.
-  // back: no index in either corner, or a card printed all over that could not be read: it is
-  // lying face down (or cannot be seen at all), which is a state of its own, not a failed reading.
+  // back: the card shows no index in either corner and looks like a back (a pattern, or a solid
+  // colour inside a rim). A face that was merely read badly is never called a back: it stays
+  // "not sure", is looked at again, and goes to the host if that does not help.
   function read(frame, card, limits) {
     var result = readFace(frame, card, limits);
     if (!result.sure) {
-      var share = printedShare(frame, card);
-      result.printed = share;
-      result.back = (!result.card && share > 0.2) || share > 0.55;
+      var signs = backSigns(frame, card), shaped = card.shaped !== false && card.w / card.h > 0.58 && card.w / card.h < 0.86;
+      result.printed = signs.pattern;
+      result.back = shaped && ((!result.card && (signs.solid || signs.pattern > 0.3)) || (signs.solid && signs.pattern > 0.2 && result.score < 0.62));
     }
     return result;
   }
