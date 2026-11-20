@@ -26,13 +26,19 @@ gcloud services enable run.googleapis.com cloudbuild.googleapis.com artifactregi
 
 ## 3. 把工作人員密碼存進 Secret Manager
 
-密碼不要直接寫在部署指令裡（會留在指令紀錄與服務設定中）：
+伺服器要知道正確的密碼，才能比對主持人輸入的對不對。這一步把密碼存進 Google 的「保險箱」（Secret Manager），部署時只告訴伺服器去保險箱拿，密碼就不會明文出現在指令紀錄與 Cloud Run 設定頁。不想多這一步的話，看本節最後的簡化版。
+
+**3-1 把密碼存進保險箱**（把 `你的密碼` 換成你要的密碼，保留單引號）：
 
 ```bash
 printf '%s' '你的密碼' | gcloud secrets create tap-duel-staff-key --data-file=-
 ```
 
-讓 Cloud Run 讀得到這個密碼（Cloud Run 預設用 Compute Engine 的預設服務帳號執行）：
+- `tap-duel-staff-key` 是保險箱裡這個項目的名稱，不是密碼。
+- 用 `printf` 而不用 `echo`：`echo` 會在結尾多一個看不見的換行，存進去的密碼就永遠對不上。
+- 成功時顯示 `Created version [1] of the secret [tap-duel-staff-key].`
+
+**3-2 允許伺服器讀取保險箱**。保險箱預設誰都不能讀，Cloud Run 執行時用的是一個機器身分（Compute Engine 預設服務帳號），要授權給它：
 
 ```bash
 PROJECT_NUMBER=$(gcloud projects describe $(gcloud config get-value project) --format='value(projectNumber)')
@@ -40,6 +46,13 @@ gcloud secrets add-iam-policy-binding tap-duel-staff-key \
   --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
   --role="roles/secretmanager.secretAccessor"
 ```
+
+- 第一行查出專案編號（一串數字，跟專案 ID 不同），不會印出東西是正常的。
+- 第二個指令給那個服務帳號「只能讀取內容」的權限，成功時會印出 `bindings:` 開頭、含有該服務帳號的設定。
+
+部署指令（第 5 步）最後的 `--set-secrets STAFF_KEY=tap-duel-staff-key:latest`，就是要伺服器啟動時去保險箱拿最新版本當作密碼。部署後若 log 出現 `STAFF_KEY is not set`，代表 3-2 的授權沒成功，伺服器改用了自己產生的隨機密碼（印在同一行）。
+
+**簡化版（內部測試用）**：跳過整個第 3 步，第 5 步最後一行改成 `--set-env-vars STAFF_KEY=你的密碼`。功能一樣，只是密碼會出現在 Cloud Run 的設定頁上。
 
 ## 4. 取得程式碼
 
