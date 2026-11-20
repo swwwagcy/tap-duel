@@ -123,6 +123,14 @@ function broadcastTable(table) {
   });
 }
 
+// Picks arrive in bursts (every viewer at once near the end of the countdown). Running totals are
+// sent at most every 250 ms instead of once per pick; phase changes still go out immediately.
+const TOTALS_INTERVAL_MS = 250;
+function broadcastSoon(table) {
+  if (table.broadcastTimer) return;
+  table.broadcastTimer = setTimeout(function () { table.broadcastTimer = null; broadcastTable(table); }, TOTALS_INTERVAL_MS);
+}
+
 function notifyStaff(table, level, text) {
   sockets.forEach(function (socket) {
     if (socket.role === 'host' && socket.watching === table.id) send(socket, { t: 'notice', table: table.id, level: level, text: text });
@@ -270,7 +278,7 @@ function handleViewer(socket, message) {
     list.push({ spot: spot.id, amount: amount });
     table.round.picks.set(viewer.id, list);
     sendMe(viewer.id);
-    broadcastTable(table);
+    broadcastSoon(table);
     return null;
   }
   if (message.t === 'undo') {
@@ -282,7 +290,7 @@ function handleViewer(socket, message) {
     viewer.points += last.amount;
     if (!list.length) table.round.picks.delete(viewer.id);
     sendMe(viewer.id);
-    broadcastTable(table);
+    broadcastSoon(table);
     return null;
   }
   if (message.t === 'refill') {
