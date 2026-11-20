@@ -141,11 +141,26 @@ gcloud run services logs read tap-duel-live --region asia-east1 --limit 50
 
 ## 9. 換密碼
 
+先確認部署時用的是哪一種方式：
+
 ```bash
-printf '%s' '新密碼' | gcloud secrets versions add tap-duel-staff-key --data-file=-
+gcloud run services describe tap-duel-live --region asia-east1 --format='yaml(spec.template.spec.containers[0].env)'
 ```
 
-然後重跑第 5 步讓服務讀到新版本。已經記住舊密碼的裝置會被要求重新輸入。
+看到 `secretKeyRef` 是 Secret Manager：
+
+```bash
+printf '%s' '新密碼' | gcloud secrets versions add tap-duel-staff-key --data-file=-
+gcloud run services update tap-duel-live --region asia-east1 --update-secrets STAFF_KEY=tap-duel-staff-key:latest
+```
+
+看到 `value:` 是簡化版：
+
+```bash
+gcloud run services update tap-duel-live --region asia-east1 --update-env-vars STAFF_KEY=新密碼
+```
+
+`services update` 不用重新建置，約 30 秒；服務會重啟，點數與回合紀錄歸零。記住舊密碼的裝置下次連線會被拒絕並跳出輸入框，輸入新密碼即可。
 
 ## 10. 不用了
 
