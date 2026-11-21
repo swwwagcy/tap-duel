@@ -7,13 +7,19 @@
 })(typeof self !== 'undefined' ? self : this, function (Games) {
   'use strict';
 
-  // options: staffKeyMatches(key) -> boolean, newId() -> string, bots: number of demo viewers,
-  // tableSettings: starting settings for every table.
+  // options: staffKeyMatches(key, role, connection) -> true, false or 'locked'; newId() -> string;
+  // bots: number of demo viewers; tableSettings: starting settings for every table;
+  // audit(entry): called for every sign-in attempt and every action that changes a round.
   function createEngine(options) {
     options = options || {};
     const staffKeyMatches = options.staffKeyMatches || function () { return false; };
     const newId = options.newId || function () { return 'v' + Math.random().toString(36).slice(2) + Date.now().toString(36); };
+    const audit = options.audit || function () {};
     const timers = [];
+    const VIEWER_LIMIT = options.viewerLimit || 5000;   // remembered viewers; idle ones are forgotten first
+    // A picture from the reader: a JPEG data address and nothing else. It is put into pages as an
+    // image address, so anything beyond base64 letters is refused.
+    const JPEG = /^data:image\/jpeg;base64,[A-Za-z0-9+/]+={0,2}$/;
 
     const CHIPS = [10, 50, 100, 500, 1000];
     const START_POINTS = 10000;
@@ -330,11 +336,13 @@
     function handleHost(socket, message) {
       const table = tableOf(message.table);
       if (!table) return 'Unknown table.';
-      if (message.t === 'open') return openRound(table, !!message.force);
-      if (message.t === 'void') return voidRound(table);
+      if (message.t === 'open') { const refused = openRound(table, !!message.force); if (!refused) audit({ action: 'open', table: table.id, round: table.round.no, forced: !!message.force, by: socket.address }); return refused; }
+      if (message.t === 'void') { const roundNo = table.round && table.round.no, refused = voidRound(table); if (!refused) audit({ action: 'void', table: table.id, round: roundNo, by: socket.address }); return refused; }
       if (message.t === 'confirm') {
         if (table.phase !== 'dealing') return '出牌階段才能確認結果。';
-        return settle(table);
+        const refused = settle(table);
+        if (!refused) audit({ action: 'confirm', table: table.id, round: table.round.no, cards: cardMap(table.round), result: table.round.outcome.text, by: socket.address });
+        return refused;
       }
       if (message.t === 'setCard') {
         if (table.phase !== 'dealing') return '出牌階段才能修改牌。';
@@ -342,6 +350,7 @@
         if (message.card === null) delete table.round.cards[message.zone];
         else if (Games.isCard(message.card)) table.round.cards[message.zone] = { card: message.card, source: 'manual', at: Date.now() };
         else return 'Unknown card.';
+        audit({ action: 'setCard', table: table.id, round: table.round.no, zone: message.zone, card: message.card, by: socket.address });
         markConflicts(table.round);
         broadcastTable(table);
         return null;
@@ -353,6 +362,7 @@
           waitSeconds: isFinite(wait) ? Math.min(30, Math.max(0, wait)) : table.settings.waitSeconds,
           auto: !!message.auto
         };
+        audit({ action: 'settings', table: table.id, settings: table.settings, by: socket.address });
         broadcastTable(table);
         return null;
       }
@@ -370,7 +380,7 @@
       if (!table) return 'Unknown table.';
       table.readerSeenAt = Date.now();
       if (message.t === 'frame') {
-        if (typeof message.image !== 'string' || message.image.indexOf('data:image/jpeg;base64,') !== 0) return null;
+        if (typeof message.image !== 'string' || message.image.length > 400000 || !JPEG.test(message.image)) return null;
         table.frame = { image: message.image, at: Date.now() };
         if (Date.now() - table.frameSentAt >= FRAME_INTERVAL_MS) {
           table.frameSentAt = Date.now();
@@ -427,7 +437,7 @@
         if (!round.warned['extra-' + zone]) { round.warned['extra-' + zone] = true; notifyStaff(table, 'warn', label + ' 現在不該出牌，這張沒有採用。'); }
         return null;
       }
-      const shot = typeof message.shot === 'string' && message.shot.indexOf('data:image/jpeg;base64,') === 0 && message.shot.length < 60000 ? message.shot : null;
+      const shot = typeof message.shot === 'string' && message.shot.length < 60000 && JPEG.test(message.shot) ? message.shot : null;
       const top = Array.isArray(message.top) ? message.top.slice(0, 3).filter(function (item) { return item && Games.isCard(item.card); }).map(function (item) { return { card: item.card, score: Number(item.score) || 0 }; }) : [];
       if (message.state === 'card' && Games.isCard(message.card)) {
         round.cards[zone] = { card: message.card, source: 'optical', score: Number(message.score) || 0, margin: Number(message.margin) || 0, top: top, shot: shot, at: Date.now() };
@@ -446,15 +456,34 @@
     }
 
 
+    // Every new id is remembered, so someone inventing ids would fill the memory. Past the limit,
+    // viewers who are not connected and have nothing in a running round are forgotten, oldest first.
+    function forgetIdleViewers() {
+      if (viewers.size < VIEWER_LIMIT) return;
+      const busy = new Set();
+      connections.forEach(function (socket) { if (socket.viewerId) busy.add(socket.viewerId); });
+      Object.keys(tables).forEach(function (id) { const round = tables[id].round; if (round && ['open', 'closed', 'dealing'].indexOf(tables[id].phase) >= 0) round.picks.forEach(function (list, viewerId) { busy.add(viewerId); }); });
+      const ids = Array.from(viewers.keys());
+      for (let index = 0; index < ids.length && viewers.size >= VIEWER_LIMIT; index++) if (!busy.has(ids[index]) && !/^bot-/.test(ids[index])) viewers.delete(ids[index]);
+    }
+
     function hello(socket, message) {
       if (message.role === 'host' || message.role === 'reader') {
-        if (!staffKeyMatches(message.key)) { send(socket, { t: 'denied' }); return null; }
+        const verdict = staffKeyMatches(message.key, message.role, socket);
+        if (verdict !== true) {
+          audit({ action: 'sign-in refused', role: message.role, locked: verdict === 'locked', by: socket.address });
+          send(socket, { t: 'denied', locked: verdict === 'locked' });
+          return null;
+        }
+        audit({ action: 'sign-in', role: message.role, by: socket.address });
         socket.role = message.role;
         send(socket, { t: 'welcome', role: socket.role, serverNow: Date.now(), tables: Object.keys(tables) });
         return null;
       }
       if (message.role === 'viewer') {
-        const id = String(message.viewerId || '').replace(/[^a-zA-Z0-9-]/g, '').slice(0, 40) || newId();
+        let id = String(message.viewerId || '').replace(/[^a-zA-Z0-9-]/g, '').slice(0, 40) || newId();
+        if (/^bot-/.test(id)) id = newId();          // the demo viewers' own ids are not for the taking
+        if (!viewers.has(id)) forgetIdleViewers();
         if (!viewers.has(id)) viewers.set(id, { id: id, name: cleanName(message.name) || ('觀眾' + id.slice(0, 4)), points: START_POINTS });
         socket.role = 'viewer';
         socket.viewerId = id;

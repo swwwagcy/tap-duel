@@ -139,6 +139,32 @@ gcloud run services logs read tap-duel-live --region asia-east1 --limit 50
 
 或到 Cloud Console 的 Cloud Run → `tap-duel-live` → 記錄。
 
+## 8-1. 安全設定
+
+伺服器內建以下保護，不用另外設定：
+
+- **密碼錯 5 次鎖 10 分鐘**：同一個網路位址在 10 分鐘內輸錯 5 次，之後 10 分鐘內即使輸入正確密碼也會被拒絕，頁面會顯示「密碼錯太多次」。已經登入的裝置不受影響。同一個辦公室網路共用一個位址，有人一直輸錯會讓大家一起被鎖；等 10 分鐘，或重新部署（服務重啟就解鎖，但回合與點數會歸零）。
+- **密碼至少 12 個字元**：比較短的話啟動時 log 會提醒。
+- **操作紀錄**：每次登入（成功或失敗）、開局、確認、取消、手動改牌、改設定，都會在 log 寫一行 `audit`，附時間與來源位址，不含密碼。查看：
+
+  ```bash
+  gcloud run services logs read tap-duel-live --region asia-east1 --limit 200 | grep audit
+  ```
+
+- 其他：每條連線每秒最多 60 則訊息、最多 1,200 條連線、記住的觀眾最多 5,000 位（超過時先忘掉沒在線上的）、頁面只能載入自己的檔案、容器不以 root 執行。
+
+**選用：讓讀牌器用另一組密碼。** 預設主持台與讀牌器共用 `STAFF_KEY`。想分開的話，多存一組密碼並在部署時多帶一個變數：
+
+```bash
+printf '%s' '讀牌器的密碼' | gcloud secrets create tap-duel-reader-key --data-file=-
+gcloud secrets add-iam-policy-binding tap-duel-reader-key \
+  --member="serviceAccount:$(gcloud projects describe $(gcloud config get-value project) --format='value(projectNumber)')-compute@developer.gserviceaccount.com" \
+  --role=roles/secretmanager.secretAccessor
+gcloud run services update tap-duel-live --region asia-east1 --update-secrets READER_KEY=tap-duel-reader-key:latest
+```
+
+設了之後：讀牌器的密碼只能開讀牌器，**不能進主持台、不能確認結果**；主持台的密碼兩邊都能開。架在桌上的那支手機只需要知道讀牌器的密碼。
+
 ## 9. 換密碼
 
 先確認部署時用的是哪一種方式：

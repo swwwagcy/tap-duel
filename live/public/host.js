@@ -22,7 +22,7 @@
   };
 
   function onMessage(message) {
-    if (message.t === 'denied') { link.close(); Live.askStaffKey(start, true); return; }
+    if (message.t === 'denied') { link.close(); Live.askStaffKey(start, message.locked ? 'locked' : true); return; }
     if (message.t === 'welcome') {
       state.tables = message.tables;
       if (state.tables.indexOf(state.tableId) < 0) state.tableId = state.tables[0];
@@ -192,7 +192,7 @@
     $('history').innerHTML = table.history.map(function (entry) {
       var cards = current.zones.filter(function (zone) { return entry.cards[zone.id] && entry.cards[zone.id].card; }).map(function (zone) {
         var card = entry.cards[zone.id];
-        return '<div class="c">' + (card.shot ? '<img alt="" src="' + card.shot + '">' : '') + '<span>' + Live.escape(zone.label) + ' ' + Games.cardLabel(card.card) + '</span><span>' + (card.source === 'manual' ? '手動' : '光學 ' + Math.round((card.score || 0) * 100) + '%') + '</span></div>';
+        return '<div class="c">' + (card.shot ? '<img alt="" src="' + Live.escape(card.shot) + '">' : '') + '<span>' + Live.escape(zone.label) + ' ' + Games.cardLabel(card.card) + '</span><span>' + (card.source === 'manual' ? '手動' : '光學 ' + Math.round((card.score || 0) * 100) + '%') + '</span></div>';
       }).join('');
       var time = new Date(entry.at);
       return '<div class="hist"><b>' + Live.escape(entry.roundNo) + '</b>　' + Live.escape(entry.text) + '<span class="muted">　' + time.toLocaleTimeString('zh-TW', { hour12: false }) + '・投入 ' + entry.staked + '、取回 ' + entry.returned + '</span><div class="cards">' + cards + '</div></div>';

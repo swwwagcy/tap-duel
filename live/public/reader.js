@@ -43,7 +43,7 @@
       hello: function () { return { t: 'hello', role: 'reader', key: key }; },
       onStatus: function (online) { if (!online) setPhase(null); },
       onMessage: function (message) {
-        if (message.t === 'denied') { link.close(); Live.askStaffKey(start, true); return; }
+        if (message.t === 'denied') { link.close(); Live.askStaffKey(start, message.locked ? 'locked' : true); return; }
         if (message.t === 'welcome') { buildTableTabs(message.tables); link.send({ t: 'watch', table: state.tableId }); if (/[?&]autostart\b/.test(location.search) && Live.demo && !state.source) startFake(); }
         else if (message.t === 'table' && message.table.id === state.tableId) { state.table = message.table; setPhase(message.table); }
         else if (message.t === 'error') Live.toast(message.text, 'bad');

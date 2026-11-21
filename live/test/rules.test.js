@@ -104,4 +104,58 @@ check('a viewer gets the viewer view, staff get the staff view', () => withEngin
   assert.ok('history' in host.got.find((message) => message.t === 'table').table);
 }));
 
+check('a reader cannot plant markup in a picture, and odd pictures are dropped', () => withEngine((engine, open) => {
+  const host = open(); host.say({ t: 'hello', role: 'host', key: 'k' }); host.say({ t: 'watch', table: 'duel' });
+  const reader = open(); reader.say({ t: 'hello', role: 'reader', key: 'k' });
+  engine.tables.duel.phase = 'dealing'; engine.tables.duel.round = { no: 'T-1', picks: new Map(), cards: {}, warned: {}, outcome: null };
+  const good = 'data:image/jpeg;base64,AAAA', evil = 'data:image/jpeg;base64,AAAA" onerror="alert(1)';
+  reader.say({ t: 'zone', table: 'duel', zone: 'R', state: 'card', card: 'S5', shot: evil });
+  assert.strictEqual(engine.tables.duel.round.cards.R.shot, null, 'a picture with anything but base64 in it is dropped');
+  assert.strictEqual(engine.tables.duel.round.cards.R.card, 'S5', 'the card itself still counts');
+  reader.say({ t: 'zone', table: 'duel', zone: 'U', state: 'card', card: 'H9', shot: good });
+  assert.strictEqual(engine.tables.duel.round.cards.U.shot, good);
+  reader.say({ t: 'frame', table: 'duel', image: evil });
+  reader.say({ t: 'frame', table: 'duel', image: 'data:text/html;base64,AAAA' });
+  assert.strictEqual(engine.tables.duel.frame, null);
+  reader.say({ t: 'frame', table: 'duel', image: good });
+  assert.strictEqual(engine.tables.duel.frame.image, good);
+  // A reader is not a host: what a host may ask is not understood from a reader.
+  reader.say({ t: 'confirm', table: 'duel' }); reader.say({ t: 'void', table: 'duel' }); reader.say({ t: 'setCard', table: 'duel', zone: 'R', card: 'SK' });
+  assert.strictEqual(engine.tables.duel.phase, 'dealing');
+  assert.strictEqual(engine.tables.duel.round.cards.R.card, 'S5');
+}));
+
+check('demo viewers cannot be impersonated, and remembered viewers have a limit', () => {
+  const engine = Engine.createEngine({ bots: 2, viewerLimit: 6 });
+  try {
+    const open = () => { const got = []; const connection = { deliver: (message) => got.push(message) }; engine.connect(connection); return { connection, got, say: (message) => engine.receive(connection, JSON.stringify(message)) }; };
+    const thief = open(); thief.say({ t: 'hello', role: 'viewer', viewerId: 'bot-0' });
+    assert.notStrictEqual(thief.got.find((message) => message.t === 'me').id, 'bot-0');
+    const stays = open(); stays.say({ t: 'hello', role: 'viewer', viewerId: 'keeper' });
+    for (let index = 0; index < 40; index++) { const passing = open(); passing.say({ t: 'hello', role: 'viewer', viewerId: 'passer-' + index }); engine.disconnect(passing.connection); }
+    assert.ok(engine.viewers.size <= 6, 'viewers remembered: ' + engine.viewers.size);
+    assert.ok(engine.viewers.has('keeper') && engine.viewers.has('bot-0') && engine.viewers.has('bot-1'), 'connected viewers and demo viewers are kept');
+  } finally { engine.stop(); }
+});
+
+check('sign-ins and round actions are written to the audit trail, a locked sign-in says so', () => {
+  const trail = [];
+  const engine = Engine.createEngine({ staffKeyMatches: (key, role) => key === 'locked-out' ? 'locked' : key === 'k' || (role === 'reader' && key === 'r'), audit: (entry) => trail.push(entry) });
+  try {
+    const open = () => { const got = []; const connection = { address: '203.0.113.9', deliver: (message) => got.push(message) }; engine.connect(connection); return { got, say: (message) => engine.receive(connection, JSON.stringify(message)) }; };
+    const wrong = open(); wrong.say({ t: 'hello', role: 'host', key: 'nope' });
+    assert.deepStrictEqual(wrong.got, [{ t: 'denied', locked: false }]);
+    const locked = open(); locked.say({ t: 'hello', role: 'host', key: 'locked-out' });
+    assert.deepStrictEqual(locked.got, [{ t: 'denied', locked: true }]);
+    const readerAsHost = open(); readerAsHost.say({ t: 'hello', role: 'host', key: 'r' });
+    assert.strictEqual(readerAsHost.got[0].t, 'denied', 'the reader key does not open the host console');
+    const reader = open(); reader.say({ t: 'hello', role: 'reader', key: 'r' });
+    assert.strictEqual(reader.got[0].t, 'welcome');
+    const host = open(); host.say({ t: 'hello', role: 'host', key: 'k' }); host.say({ t: 'open', table: 'duel' }); host.say({ t: 'void', table: 'duel' });
+    assert.deepStrictEqual(trail.map((entry) => entry.action), ['sign-in refused', 'sign-in refused', 'sign-in refused', 'sign-in', 'sign-in', 'open', 'void']);
+    assert.ok(trail.every((entry) => entry.by === '203.0.113.9'));
+    assert.ok(!JSON.stringify(trail).includes('nope') && !JSON.stringify(trail).includes('"k"'), 'keys are never written to the trail');
+  } finally { engine.stop(); }
+});
+
 console.log(count + ' checks passed');

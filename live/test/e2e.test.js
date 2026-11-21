@@ -7,11 +7,12 @@ const path = require('path');
 const { spawn } = require('child_process');
 const assert = require('assert');
 const WebSocket = require('ws');
+const http = require('http');
 const { chromium } = require('playwright');
 
 const PORT = 18000 + Math.floor(Math.random() * 1000);
 const BASE = 'http://127.0.0.1:' + PORT;
-const KEY = 'test-key';
+const KEY = 'test-key-for-staff', READER_KEY = 'test-key-for-reader';
 let server, browser;
 
 function wait(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
@@ -37,7 +38,7 @@ const clear = (socket, table, zones) => zones.forEach(zone => socket.send(JSON.s
 const card = (socket, table, zone, value) => socket.send(JSON.stringify({ t: 'zone', table, zone, state: 'card', card: value, score: 0.95, margin: 0.8, top: [{ card: value, score: 0.95 }] }));
 
 (async () => {
-  server = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], { env: Object.assign({}, process.env, { PORT: String(PORT), STAFF_KEY: KEY }), stdio: ['ignore', 'pipe', 'inherit'] });
+  server = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], { env: Object.assign({}, process.env, { PORT: String(PORT), STAFF_KEY: KEY, READER_KEY: READER_KEY }), stdio: ['ignore', 'pipe', 'inherit'] });
   await until(async () => { try { return (await fetch(BASE + '/health')).ok; } catch (error) { return false; } }, 'server start');
   step('server started');
 
@@ -163,7 +164,7 @@ const card = (socket, table, zone, value) => socket.send(JSON.stringify({ t: 'zo
   /* Round 4: the real reader page reads cards from a synthetic camera, with nothing registered. */
   const readerPage = await (await browser.newContext({ viewport: { width: 1100, height: 900 } })).newPage();
   readerPage.on('pageerror', error => errors.push(error.message));
-  await readerPage.goto(BASE + '/reader.html#key=' + KEY);
+  await readerPage.goto(BASE + '/reader.html#key=' + READER_KEY);   // the reader's own key
   await readerPage.evaluate(() => { window.__fake = DemoCamera.source(1920, 1080); window.__readerSource = window.__fake.canvas; });
   await until(() => readerPage.evaluate(() => document.querySelectorAll('#tableTabs button').length === 2), 'reader tabs');
   await readerPage.click('#tableTabs button[data-table="duel"]');
@@ -248,6 +249,26 @@ const card = (socket, table, zone, value) => socket.send(JSON.stringify({ t: 'zo
   await viewer.screenshot({ path: path.join(__dirname, 'shots', 'viewer.png'), fullPage: true });
   await readerPage.screenshot({ path: path.join(__dirname, 'shots', 'reader.png') });
   assert.deepStrictEqual(errors, [], 'page errors: ' + errors.join(' | '));
+  /* Security: headers on every file, the reader key does not open the host console, and wrong
+     keys lock the address out (this runs last: it locks this machine's own address). */
+  const headers = await new Promise((resolve, reject) => http.get(BASE + '/host.html', response => { response.resume(); resolve(response.headers); }).on('error', reject));
+  assert.strictEqual(headers['x-content-type-options'], 'nosniff');
+  assert.ok(/frame-ancestors 'self'/.test(headers['content-security-policy']) && /default-src 'self'/.test(headers['content-security-policy']));
+  const signIn = (role, key) => new Promise((resolve, reject) => {
+    const socket = new WebSocket('ws://localhost:' + PORT + '/ws');
+    socket.on('open', () => socket.send(JSON.stringify({ t: 'hello', role, key })));
+    socket.on('message', raw => { const message = JSON.parse(raw); socket.close(); resolve(message); });
+    socket.on('error', reject);
+  });
+  assert.deepStrictEqual(await signIn('host', READER_KEY), { t: 'denied', locked: false }, 'reader key refused for the host console');
+  assert.strictEqual((await signIn('reader', READER_KEY)).t, 'welcome');
+  assert.strictEqual((await signIn('reader', KEY)).t, 'welcome', 'the host key still opens the reader');
+  const answers = [];
+  for (let attempt = 0; attempt < 5; attempt++) answers.push((await signIn('host', 'guess-' + attempt)).locked);
+  assert.deepStrictEqual(answers, [false, false, false, false, true], 'the fifth wrong key locks the address');
+  assert.deepStrictEqual(await signIn('host', KEY), { t: 'denied', locked: true }, 'while locked, even the right key is refused');
+  step('security: headers set, reader key cannot host, fifth wrong key locks the address');
+
   step('no page errors');
   console.log('e2e ok');
 })().catch(error => { console.error('FAILED: ' + error.message); process.exitCode = 1; }).finally(async () => {

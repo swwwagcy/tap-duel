@@ -105,26 +105,31 @@
 
   // Staff pages (host and reader) need the staff key. It can arrive once in the address
   // (#key=...) and is then kept on this device and removed from the address.
+  // The reader may have a key of its own (READER_KEY), so each page remembers its key separately.
+  // A reader that has none yet uses the key the host page stored on the same device.
+  function keySlot() { return /reader\.html$/.test(location.pathname) ? 'tdl-reader-key' : 'tdl-staff-key'; }
   Live.staffKey = function () {
     if (Live.demo) return 'demo';
     var match = /(?:^|[#&])key=([^&]+)/.exec(location.hash);
     if (match) {
-      Live.store.set('tdl-staff-key', decodeURIComponent(match[1]));
+      Live.store.set(keySlot(), decodeURIComponent(match[1]));
       history.replaceState(null, '', location.pathname + location.search);
     }
-    return Live.store.get('tdl-staff-key', '');
+    return Live.store.get(keySlot(), '') || Live.store.get('tdl-staff-key', '');
   };
+  // wrong: true after a refused key; 'locked' when this address has tried too many wrong keys.
   Live.askStaffKey = function (onKey, wrong) {
+    var old = document.querySelector('.keygate'); if (old) old.remove();
     var box = document.createElement('div');
     box.className = 'keygate';
-    box.innerHTML = '<form><h2>輸入工作人員密碼</h2>' + (wrong ? '<p class="bad">密碼不對，請再輸入一次。</p>' : '<p>主持台與讀牌器需要密碼，部署時設定在 STAFF_KEY。</p>') +
+    box.innerHTML = '<form><h2>輸入工作人員密碼</h2>' + (wrong === 'locked' ? '<p class="bad">密碼錯太多次，這個網路位址暫時被鎖住。請等 10 分鐘再試。</p>' : wrong ? '<p class="bad">密碼不對，請再輸入一次。</p>' : '<p>主持台與讀牌器需要密碼，部署時設定在 STAFF_KEY。</p>') +
       '<input id="keyInput" type="password" autocomplete="current-password" required><button class="primary" type="submit">進入</button></form>';
     document.body.appendChild(box);
     box.querySelector('form').addEventListener('submit', function (event) {
       event.preventDefault();
       var key = box.querySelector('input').value.trim();
       if (!key) return;
-      Live.store.set('tdl-staff-key', key);
+      Live.store.set(keySlot(), key);
       box.remove();
       onKey(key);
     });
