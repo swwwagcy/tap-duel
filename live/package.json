@@ -11,7 +11,8 @@
     "test:e2e": "node test/e2e.test.js",
     "test:demo": "node test/demo.test.js",
     "test:perspective": "node test/perspective.test.js",
-    "test:all": "node test/rules.test.js && node test/ocr.test.js && node test/perspective.test.js && node test/e2e.test.js && node test/demo.test.js"
+    "test:steady": "node test/steady.test.js",
+    "test:all": "node test/rules.test.js && node test/ocr.test.js && node test/perspective.test.js && node test/steady.test.js && node test/e2e.test.js && node test/demo.test.js"
   },
   "engines": { "node": ">=20" },
   "dependencies": {

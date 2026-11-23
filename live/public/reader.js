@@ -13,6 +13,13 @@
   var HARD_MIN_CARD_PX = 150;      // below this a reading is never trusted
   var SEARCH_MARGIN = 0.08;        // the card is looked for a little beyond the drawn frame
   var RETRY_TICKS = 10;            // a face-down or unread card is looked at again this often
+  // A card that has been read is held: light changing, a shadow or a hand passing over it does
+  // not undo the reading. It gives way only when the position stays empty, when another card is
+  // read there twice running, or when it cannot be confirmed for several looks in a row.
+  var EMPTY_FRAMES_HELD = 8;       // a held card must be gone this many frames (about a second)
+  var CHECK_TICKS = 7;             // a held card is compared with how it looked, about once a second
+  var SAME_CARD = 0.9;             // likeness (1 = identical pattern) above which it is the same card, whatever the light
+  var DOUBT_ROUNDS = 4;            // looks in a row that cannot confirm a held card before it is let go
   var FRAME_SEND_MS = 700;
   var WORK_MAX_WIDTH = 1920;
   var RAW_MAX_WIDTH = 2560;        // with a slanted camera, more of the camera's detail is kept before straightening
@@ -97,7 +104,7 @@
   }
   function resetZoneStates() {
     state.zoneState = {};
-    game().zones.forEach(function (zone) { state.zoneState[zone.id] = { status: 'empty', still: 0, wait: 0, emptyCount: EMPTY_FRAMES, reads: [], prev: null, result: null, reported: 'empty', lastMessage: null }; });
+    game().zones.forEach(function (zone) { state.zoneState[zone.id] = { status: 'empty', still: 0, wait: 0, emptyCount: EMPTY_FRAMES, reads: [], prev: null, result: null, reported: 'empty', lastMessage: null, found: null, held: null, check: false, sinceCheck: 0, checkWait: 0, doubt: 0, rival: null, same: null }; });
   }
   function rectOf(zoneId) {
     var z = state.zones[zoneId];
@@ -132,6 +139,43 @@
     rimPixel = [middle[0], middle[1], middle[2]];
     return rimPixel;
   }
+  // Movement between two looks at a position, with a change of overall brightness taken out
+  // first: the light dimming, or the camera re-exposing when an arm comes into view, changes every
+  // cell by the same factor and is not movement. The factor is the middle one of all the cells', so
+  // something that really moves over part of the position still counts.
+  function steadyMotion(now, before) {
+    var ratios = [], index;
+    for (index = 0; index < now.length; index += 3) {
+      var was = before[index] + before[index + 1] + before[index + 2];
+      if (was > 45) ratios.push((now[index] + now[index + 1] + now[index + 2]) / was);
+    }
+    var gain = 1;
+    if (ratios.length >= 8) { ratios.sort(function (a, b) { return a - b; }); gain = Math.max(0.5, Math.min(2, ratios[ratios.length >> 1])); }
+    var total = 0;
+    for (index = 0; index < now.length; index++) total += Math.abs(now[index] - gain * before[index]);
+    return total / now.length;
+  }
+
+  // How the middle of a card looks, as light-and-dark pattern only: brightness and contrast are
+  // taken out, so the same card under brighter or dimmer light gives the same pattern.
+  var PATTERN_W = 20, PATTERN_H = 28;
+  function cardPattern(frame, box) {
+    var out = new Float32Array(PATTERN_W * PATTERN_H), data = frame.data, width = frame.width, height = frame.height, sum = 0, index = 0;
+    for (var row = 0; row < PATTERN_H; row++) for (var col = 0; col < PATTERN_W; col++) {
+      var x = Math.max(0, Math.min(width - 2, Math.round(box.cx + ((col + 0.5) / PATTERN_W - 0.5) * box.w * 0.74)));
+      var y = Math.max(0, Math.min(height - 2, Math.round(box.cy + ((row + 0.5) / PATTERN_H - 0.5) * box.h * 0.74)));
+      var total = 0;
+      for (var dy = 0; dy < 2; dy++) for (var dx = 0; dx < 2; dx++) { var at = ((y + dy) * width + x + dx) * 4; total += 0.299 * data[at] + 0.587 * data[at + 1] + 0.114 * data[at + 2]; }
+      out[index] = total / 4; sum += out[index++];
+    }
+    var mean = sum / out.length, spread = 0;
+    for (index = 0; index < out.length; index++) { out[index] -= mean; spread += out[index] * out[index]; }
+    spread = Math.sqrt(spread / out.length) || 1;
+    for (index = 0; index < out.length; index++) out[index] /= spread;
+    return out;
+  }
+  function likeness(a, b) { var total = 0; for (var index = 0; index < a.length; index++) total += a[index] * b[index]; return total / a.length; }
+
   function flatSignature(colour, length) {
     var out = new Float32Array(length);
     for (var index = 0; index < length; index += 3) { out[index] = colour[0]; out[index + 1] = colour[1]; out[index + 2] = colour[2]; }
@@ -168,6 +212,7 @@
     $('startCamera').textContent = '相機運行中'; $('startCamera').disabled = true;
     CardOCR.build();
     setupZoom();
+    setTimeout(lockCamera, 2000);          // let the camera settle on the scene first
     loadTable();
     Live.keepAwake();
     tick();
@@ -231,6 +276,42 @@
     setTimeout(tick, Math.max(15, TICK_MS - (performance.now() - started)));
   }
 
+  /* ---------------- camera lock ---------------- */
+  // Left on automatic, a phone camera re-exposes and re-balances colour every time an arm comes
+  // into view, and the whole picture shifts. Where the browser allows it, exposure, white balance
+  // and focus are fixed at what the camera chose for the table. "Measure light again" lets it
+  // choose afresh after the lighting is changed.
+  function lockCamera() {
+    var track = state.track, capabilities = null, settings = {};
+    $('relock').hidden = !track;
+    if (!track || !track.getCapabilities) { state.cameraLock = track ? 'unsupported' : null; return; }
+    try { capabilities = track.getCapabilities(); settings = track.getSettings ? track.getSettings() : {}; } catch (error) { capabilities = null; }
+    if (!capabilities) { state.cameraLock = 'unsupported'; return; }
+    function offers(name) { return Array.isArray(capabilities[name]) && capabilities[name].indexOf('manual') >= 0; }
+    var wanted = [];
+    if (offers('exposureMode')) wanted.push(settings.exposureTime ? { exposureMode: 'manual', exposureTime: settings.exposureTime } : { exposureMode: 'manual' });
+    if (offers('whiteBalanceMode')) wanted.push(settings.colorTemperature ? { whiteBalanceMode: 'manual', colorTemperature: settings.colorTemperature } : { whiteBalanceMode: 'manual' });
+    if (offers('focusMode')) wanted.push(settings.focusDistance ? { focusMode: 'manual', focusDistance: settings.focusDistance } : { focusMode: 'manual' });
+    if (!wanted.length) { state.cameraLock = 'unsupported'; return; }
+    var done = 0;
+    wanted.reduce(function (chain, constraint) {
+      return chain.then(function () { return track.applyConstraints({ advanced: [constraint] }).then(function () { done++; }, function () { /* this one is not honoured on this device */ }); });
+    }, Promise.resolve()).then(function () { state.cameraLock = done === wanted.length ? 'locked' : done ? 'partly' : 'unsupported'; });
+  }
+  function unlockCamera() {
+    var track = state.track, capabilities = null;
+    if (!track || !track.getCapabilities) return Promise.resolve();
+    try { capabilities = track.getCapabilities(); } catch (error) { return Promise.resolve(); }
+    var back = [];
+    ['exposureMode', 'whiteBalanceMode', 'focusMode'].forEach(function (name) { if (Array.isArray(capabilities[name]) && capabilities[name].indexOf('continuous') >= 0) { var one = {}; one[name] = 'continuous'; back.push(one); } });
+    return back.reduce(function (chain, constraint) { return chain.then(function () { return track.applyConstraints({ advanced: [constraint] }).catch(function () {}); }); }, Promise.resolve());
+  }
+  $('relock').addEventListener('click', function () {
+    $('relock').disabled = true; state.cameraLock = 'measuring';
+    unlockCamera().then(function () { setTimeout(function () { lockCamera(); $('relock').disabled = false; resetZoneStates(); }, 2000); });
+  });
+  var LOCK_TEXT = { locked: '曝光已鎖定', partly: '曝光部分鎖定', unsupported: '這台裝置無法鎖定曝光', measuring: '重新測光中' };
+
   /* ---------------- zoom ---------------- */
   // The camera's own zoom is used where the browser offers it (it keeps full detail, and can go
   // wider than 1x on phones with a wide lens). Otherwise the middle of the picture is enlarged.
@@ -268,17 +349,24 @@
       var zs = state.zoneState[zone.id], rect = searchRect(zone.id);
       var table = tableColour(frame, rect);
       var sig = R.signature(frame, rect), covered = R.coverage(sig, flatSignature(table, sig.length));
-      var moved = zs.prev ? R.motion(sig, zs.prev) : 99;
+      var moved = zs.prev ? steadyMotion(sig, zs.prev) : 99;
+      var held = zs.status === 'card';
       zs.prev = sig; zs.coverage = covered; zs.moving = moved; zs.why = '';
       if (covered < defaults.presence * 0.5) {
         zs.still = 0; zs.reads = []; zs.attempts = 0; zs.height = 0;
-        if (++zs.emptyCount >= EMPTY_FRAMES && zs.status !== 'empty') { zs.status = 'empty'; zs.result = null; report(zone.id, { state: 'empty' }); }
+        if (++zs.emptyCount >= (held ? EMPTY_FRAMES_HELD : EMPTY_FRAMES) && zs.status !== 'empty') { letGo(zs); zs.status = 'empty'; zs.result = null; report(zone.id, { state: 'empty' }); }
         return;
       }
       zs.emptyCount = 0;
       if (covered < defaults.presence) { zs.why = '變化太小，看不出有牌'; return; }
-      if (moved > defaults.stillness) { zs.why = '畫面在動，等牌放穩'; zs.still = 0; zs.reads = []; zs.attempts = 0; zs.status = 'busy'; return; }
+      if (moved > defaults.stillness) {
+        zs.still = 0; zs.reads = [];
+        // Something moving over a card that was read does not undo the reading; it is checked once things are still.
+        if (held) { zs.check = true; zs.checkWait = 0; zs.why = '有東西經過，先保留讀到的牌'; return; }
+        zs.why = '畫面在動，等牌放穩'; zs.attempts = 0; zs.status = 'busy'; return;
+      }
       zs.still++;
+      if (held) { confirmHeld(zone.id, zs, rect, frame, table); return; }
       if (zs.status === 'back' || zs.status === 'unsure') {
         // Face down or not read yet: look again every so often (a flip also shows up as movement).
         if (++zs.wait < RETRY_TICKS) return;
@@ -291,12 +379,68 @@
         if (zs.still > STILL_FRAMES + 8) finish(zone.id, zs, rect);
         return;
       }
-      state.lastSize = Math.round(found.h); zs.height = Math.round(found.h);
+      state.lastSize = Math.round(found.h); zs.height = Math.round(found.h); zs.found = found;
       var reading = CardOCR.read(frame, found);
       if (found.h < HARD_MIN_CARD_PX) { reading.sure = false; reading.problem = 'card too small'; }
       zs.reads.push(reading);
       if (zs.reads.length >= READ_FRAMES) finish(zone.id, zs, rect);
     });
+  }
+
+  // Holding a card that was read. hold() remembers where it lies and how it looks now.
+  function hold(zs, frame, found) {
+    if (found) zs.held = { box: { cx: found.cx, cy: found.cy, w: found.w, h: found.h }, pattern: null };
+    if (zs.held) zs.held.pattern = cardPattern(frame, zs.held.box);
+    zs.check = false; zs.sinceCheck = 0; zs.checkWait = 0; zs.doubt = 0; zs.rival = null; zs.reads = []; zs.why = '';
+  }
+  function letGo(zs) { zs.held = null; zs.check = false; zs.sinceCheck = 0; zs.checkWait = 0; zs.doubt = 0; zs.rival = null; zs.same = null; }
+
+  // Called on every still frame of a held card. Most of the time it only compares the card's
+  // pattern with the one remembered (cheap, and blind to brightness). Only when that differs is the
+  // card read again, and then: the same card -> keep holding; another card twice running -> take
+  // the new one; unreadable several looks in a row -> let go and say so.
+  function confirmHeld(zoneId, zs, rect, frame, table) {
+    if (zs.still < STILL_FRAMES || state.mode !== 'run') return;
+    if (!zs.reads.length) {
+      if (!zs.check && ++zs.sinceCheck < CHECK_TICKS) return;
+      zs.sinceCheck = 0;
+      if (zs.checkWait > 0) { zs.checkWait--; return; }
+      zs.looksSame = false;
+      if (zs.held && zs.held.pattern) {
+        zs.same = likeness(cardPattern(frame, zs.held.box), zs.held.pattern);
+        zs.looksSame = zs.same >= SAME_CARD;
+        // Nothing has moved and it looks the same: nothing to do. After something has passed over
+        // it, looking the same is not enough (a nine of spades and a nine of clubs look alike at
+        // this level of detail), so it is read again below.
+        if (zs.looksSame && !zs.check) { zs.doubt = 0; zs.rival = null; zs.why = ''; return; }
+      }
+    }
+    var found = R.locate(frame, { colour: table }, rect);
+    var reading = found ? CardOCR.read(frame, found) : { card: null, sure: false, score: 0, margin: 0, top: [] };
+    if (found && found.h < HARD_MIN_CARD_PX) { reading.sure = false; reading.problem = 'card too small'; }
+    if (found) zs.found = found;
+    zs.reads.push(reading);
+    if (zs.reads.length < READ_FRAMES) return;
+    var verdict = decide(zs.reads), latest = zs.found;
+    zs.reads = [];
+    if (verdict.sure && verdict.reading.card === zs.result.card) { hold(zs, frame, found || latest); return; }     // same card in new light
+    if (verdict.sure) {
+      if (zs.rival !== verdict.reading.card) { zs.rival = verdict.reading.card; zs.check = true; return; }       // look once more before believing it
+      zs.result = verdict.reading; hold(zs, frame, found || latest);
+      report(zoneId, { state: 'card', card: verdict.reading.card, score: round(verdict.reading.score), margin: round(verdict.reading.margin), top: compactTop(verdict.reading.top), shot: cropShot(rectOf(zoneId)) });
+      return;
+    }
+    zs.rival = null;
+    // Not readable just now, but the pattern is the one remembered: same card, poor light.
+    if (zs.looksSame) { zs.check = false; zs.doubt = 0; zs.why = ''; return; }
+    if (++zs.doubt < DOUBT_ROUNDS) { zs.check = true; zs.checkWait = RETRY_TICKS; zs.why = '暫時看不清楚（光線或遮擋），先保留讀到的牌'; return; }
+    // It can no longer be vouched for: say what is seen now, as a first reading would.
+    letGo(zs);
+    zs.result = verdict.reading; zs.wait = 0;
+    if (verdict.back) { zs.status = 'back'; zs.why = ''; report(zoneId, { state: 'back' }); return; }
+    zs.status = 'unsure'; zs.attempts = READ_ATTEMPTS;
+    zs.why = verdict.reading && verdict.reading.problem ? (PROBLEMS[verdict.reading.problem] || verdict.reading.problem) : '原本讀到的牌已經無法確認';
+    report(zoneId, { state: 'unsure', top: compactTop(verdict.reading && verdict.reading.top), shot: cropShot(rectOf(zoneId)) });
   }
 
   // Several frames were read separately. The card is accepted when at least two of them are sure
@@ -316,10 +460,11 @@
     var reads = zs.reads; zs.reads = [];
     var verdict = decide(reads), reading = verdict.reading;
     zs.result = reading; zs.wait = 0;
-    if (verdict.back) { zs.status = 'back'; zs.why = ''; zs.again = false; report(zoneId, { state: 'back' }); return; }
+    if (verdict.back) { letGo(zs); zs.status = 'back'; zs.why = ''; zs.again = false; report(zoneId, { state: 'back' }); return; }
     zs.attempts = (zs.attempts || 0) + 1;
     if (!verdict.sure && zs.attempts < READ_ATTEMPTS) { zs.status = 'busy'; zs.still = 0; return; }   // read again with fresh frames
     zs.status = verdict.sure ? 'card' : 'unsure';
+    if (verdict.sure) hold(zs, state.frame, zs.found); else letGo(zs);
     if (!verdict.sure) zs.why = reading && reading.problem ? (PROBLEMS[reading.problem] || reading.problem) : reading ? '把握不夠' : '讀不到牌';
     var shot = cropShot(rectOf(zoneId));
     report(zoneId, verdict.sure
@@ -361,7 +506,7 @@
     var warnings = [];
     if (state.lastSize && state.lastSize < MIN_CARD_PX) warnings.push('牌在畫面中太小');
     if (Live.awake !== 'on') warnings.push(Live.awake === 'unsupported' ? '這個瀏覽器無法保持螢幕常亮' : '螢幕常亮未開啟，點一下畫面');
-    var text = fps.toFixed(0) + ' fps' + (state.lastSize ? '・牌高 ' + state.lastSize + 'px' : '') + (warnings.length ? '・' + warnings.join('・') : '');
+    var text = fps.toFixed(0) + ' fps' + (state.lastSize ? '・牌高 ' + state.lastSize + 'px' : '') + (state.cameraLock ? '・' + LOCK_TEXT[state.cameraLock] : '') + (warnings.length ? '・' + warnings.join('・') : '');
     $('statusText').textContent = text;
     $('sizeText').innerHTML = state.lastSize && state.lastSize < MIN_CARD_PX ? '<span class="warn">牌太小，請把手機拉近或把牌位排大一點（建議 ' + MIN_CARD_PX + 'px 以上）</span>' : '';
     if (Date.now() - state.statusSentAt < 2000) return;
@@ -401,14 +546,14 @@
     $('readouts').innerHTML = game().zones.map(function (zone) {
       var zs = state.zoneState[zone.id] || {};
       var card = zs.status === 'card' && zs.result ? zs.result.card : null;
-      var text = zs.status === 'card' ? '讀到 ' + Math.round(zs.result.score * 100) + '%' : zs.status === 'back' ? '牌背（未翻開）' : zs.status === 'unsure' ? '認不出來' : zs.status === 'busy' ? '偵測中' : '空';
+      var text = zs.status === 'card' ? '讀到 ' + Math.round(zs.result.score * 100) + '%' + (zs.check ? '（保留中）' : '') : zs.status === 'back' ? '牌背（未翻開）' : zs.status === 'unsure' ? '認不出來' : zs.status === 'busy' ? '偵測中' : '空';
       var numbers = [];
       if (zs.coverage != null) numbers.push('覆蓋 ' + Math.round(zs.coverage * 100) + '%');
       if (zs.moving != null && zs.moving < 90) numbers.push('晃動 ' + zs.moving.toFixed(0));
       if (zs.height) numbers.push('牌高 ' + zs.height + 'px');
       if (zs.result && zs.result.card) numbers.push('最像 ' + Games.cardLabel(zs.result.card) + ' ' + zs.result.score.toFixed(2) + '／差距 ' + zs.result.margin.toFixed(2));
       return '<div class="readout ' + zone.side + '">' + Live.cardHtml(card) + '<div style="min-width:0"><div class="label">' + Live.escape(zone.label) + '　' + text + '</div>' +
-        '<div class="diag">' + numbers.join('・') + '</div>' + (zs.why && zs.status !== 'card' ? '<div class="why">' + Live.escape(zs.why) + '</div>' : '') + '</div></div>';
+        '<div class="diag">' + numbers.join('・') + '</div>' + (zs.why && (zs.status !== 'card' || zs.check) ? '<div class="why">' + Live.escape(zs.why) + '</div>' : '') + '</div></div>';
     }).join('');
   }
 
