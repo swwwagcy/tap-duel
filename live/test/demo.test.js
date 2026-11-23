@@ -97,6 +97,56 @@ async function playRound(page, table, spot) {
     assert.ok(await host.evaluate(() => !!document.querySelector('.demotag')), 'demo tag shown on standalone pages');
     step('standalone tabs share one table through the shared worker');
 
+    // The half sheet inside a mock live room: 390 x 347, no video of its own, and never ahead of
+    // the stream: no card faces while dealing, the result only after the stream delay.
+    {
+      const roomPage = await context.newPage();
+      roomPage.on('pageerror', error => errors.push(error.message));
+      await roomPage.setViewportSize({ width: 1500, height: 1000 });
+      await roomPage.goto(base + '/demo.html?viewer=room&table=duel');
+      const frame = name => roomPage.frames().find(item => new RegExp(name + '\\.html').test(item.url()));
+      await until(() => !!frame('sheet') && !!frame('host') && !!frame('reader'), 'room: frames loaded');
+      const host = frame('host'), sheet = frame('sheet'), reader = frame('reader');
+      await until(() => reader.evaluate(() => window.__readerState && !!window.__readerState.frame), 'room: reader camera running', 40000);
+      await until(() => host.evaluate(() => document.querySelector('.zone') && document.getElementById('mainButton').textContent === '開始新回合'), 'room: host ready');
+      const box = await frame('room').evaluate(() => { const rect = document.getElementById('sheet').getBoundingClientRect(); return { width: Math.round(rect.width), height: Math.round(rect.height) }; });
+      assert.ok(Math.abs(box.width / box.height - 390 / 347) < 0.02 && box.width <= 390, 'the sheet is given a frame in the 390 x 347 shape: ' + JSON.stringify(box));
+      assert.strictEqual(await sheet.evaluate(() => document.querySelectorAll('img, video').length), 0, 'the sheet carries no picture of the table');
+      assert.strictEqual(await sheet.evaluate(() => document.documentElement.scrollHeight <= window.innerHeight && document.documentElement.scrollWidth <= window.innerWidth), true, 'everything fits in the frame without scrolling');
+      await host.click('#mainButton');
+      await until(() => sheet.evaluate(() => document.getElementById('stage').dataset.phase === 'open' && !document.querySelector('.spot[data-spot="R"]').disabled), 'room: sheet can choose');
+      await sheet.click('.chip[data-chip="100"]');
+      await sheet.click('.spot[data-spot="R"]');
+      await until(() => sheet.evaluate(() => document.getElementById('net').textContent === '100'), 'room: the pick shows on the sheet');
+      await until(() => host.evaluate(() => document.getElementById('phaseBox').dataset.phase === 'dealing'), 'room: dealing', 20000);
+      let early = 0;
+      const faces = () => sheet.evaluate(() => document.querySelectorAll('#hands .cardface:not(.empty):not(.back)').length);
+      await until(async () => {
+        early = Math.max(early, await faces());
+        const state = await host.evaluate(() => ({ ok: !document.getElementById('mainButton').disabled, unsure: Array.from(document.querySelectorAll('.zone.unsure')).map(tile => tile.dataset.zone) }));
+        if (state.ok) return true;
+        for (const zone of state.unsure) {
+          const truth = await reader.evaluate(z => window.__readerState.dealt[z], zone);
+          if (!truth) continue;
+          await host.click('.zone[data-zone="' + zone + '"]');
+          await host.click('#pickerSuits button[data-suit="' + truth[0] + '"]');
+          await host.click('#pickerRanks button[data-rank="' + truth.slice(1) + '"]');
+        }
+        return false;
+      }, 'room: all cards in', 40000);
+      assert.strictEqual(early, 0, 'no card face on the sheet while cards are dealt');
+      assert.strictEqual(await sheet.evaluate(() => !document.getElementById('watch').hidden), true, 'the sheet points at the stream meanwhile');
+      await host.click('#mainButton');
+      await until(() => host.evaluate(() => document.getElementById('phaseBox').dataset.phase === 'result'), 'room: settled');
+      assert.strictEqual(await sheet.evaluate(() => document.getElementById('stage').dataset.phase), 'dealing', 'the sheet does not show the result the moment it is settled');
+      assert.strictEqual(await faces(), 0, 'nor the cards');
+      await until(() => sheet.evaluate(() => document.getElementById('stage').dataset.phase === 'result'), 'room: the sheet shows the result after the stream delay', 8000);
+      assert.strictEqual(await faces(), 2, 'both cards are shown with the result');
+      assert.ok(/^[+−]?[\d,]+$/.test(await sheet.evaluate(() => document.getElementById('net').textContent)), 'the round outcome in points is shown');
+      await roomPage.close();
+      step('half sheet in a mock live room: fits its frame (390 x 347 shape, here ' + box.width + ' x ' + box.height + '), no table picture, no card before the stream delay, result after it');
+    }
+
     assert.deepStrictEqual(errors, [], 'page errors: ' + errors.join(' | '));
     step('no page errors');
     console.log('demo ok');

@@ -357,10 +357,11 @@
     if (!settings) return;
     if (document.activeElement !== $('setOpen')) $('setOpen').value = settings.openSeconds;
     if (document.activeElement !== $('setWait')) $('setWait').value = settings.waitSeconds;
+    if (document.activeElement !== $('setStream')) $('setStream').value = settings.streamDelay || 0;
     $('setAuto').checked = settings.auto;
   }
-  function sendSettings() { link.send({ t: 'settings', table: state.tableId, openSeconds: $('setOpen').value, waitSeconds: $('setWait').value, auto: $('setAuto').checked }); }
-  ['setOpen', 'setWait', 'setAuto'].forEach(function (id) { $(id).addEventListener('change', sendSettings); });
+  function sendSettings() { link.send({ t: 'settings', table: state.tableId, openSeconds: $('setOpen').value, waitSeconds: $('setWait').value, streamDelay: $('setStream').value, auto: $('setAuto').checked }); }
+  ['setOpen', 'setWait', 'setStream', 'setAuto'].forEach(function (id) { $(id).addEventListener('change', sendSettings); });
   $('openDrawer').addEventListener('click', function () { $('drawer').hidden = false; fillSettings(); renderHistory(); });
   $('closeDrawer').addEventListener('click', function () { $('drawer').hidden = true; });
 

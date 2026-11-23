@@ -170,4 +170,37 @@ check('staff are told what confirming would settle; viewers are not', () => with
   assert.ok(!('preview' in last(viewer)), 'viewers get no preview');
 }));
 
-console.log(count + ' checks passed');
+// With a stream delay, viewers must not be ahead of the video: no card faces while dealing, and
+// the result only once the delay has passed. Points are settled at once on the server all the same.
+const delayed = (async () => {
+  const engine = Engine.createEngine({ staffKeyMatches: (key) => key === 'k', tableSettings: { streamDelay: 0.4 } });
+  try {
+    const open = () => { const got = []; const connection = { deliver: (message) => got.push(JSON.parse(JSON.stringify(message))) }; engine.connect(connection); return { got, say: (message) => engine.receive(connection, JSON.stringify(message)) }; };
+    const last = (who) => who.got.filter((message) => message.t === 'table').pop().table;
+    const host = open(); host.say({ t: 'hello', role: 'host', key: 'k' }); host.say({ t: 'watch', table: 'duel' });
+    const viewer = open(); viewer.say({ t: 'hello', role: 'viewer', viewerId: 'late-viewer' }); viewer.say({ t: 'watch', table: 'duel' });
+    host.say({ t: 'open', table: 'duel' });
+    viewer.say({ t: 'pick', table: 'duel', spot: 'R', amount: 100 });
+    engine.tables.duel.phase = 'dealing';
+    host.say({ t: 'setCard', table: 'duel', zone: 'R', card: 'SK' }); host.say({ t: 'setCard', table: 'duel', zone: 'U', card: 'H9' });
+    assert.deepStrictEqual(last(viewer).cards, { R: { card: null, back: true }, U: { card: null, back: true } }, 'no card faces for viewers while dealing');
+    assert.strictEqual(last(host).cards.R.card, 'SK', 'staff see the cards');
+    host.say({ t: 'confirm', table: 'duel' });
+    assert.strictEqual(last(host).phase, 'result');
+    assert.strictEqual(engine.viewers.get('late-viewer').points, 10100, 'points are settled at once');
+    const early = last(viewer);
+    assert.ok(early.phase === 'dealing' && early.outcome === null && early.cards.R.card === null && early.road.length === 0, 'the result is held back from viewers');
+    assert.strictEqual(viewer.got.filter((message) => message.t === 'result').length, 0, 'no result message yet');
+    assert.strictEqual(viewer.got.filter((message) => message.t === 'me').pop().points, 9900, 'the viewer still sees the points from before the result');
+    host.say({ t: 'open', table: 'duel' });
+    assert.ok(/觀眾端還沒看到/.test(host.got.filter((message) => message.t === 'error').pop().text), 'the next round cannot start before viewers have seen this one');
+    await new Promise((resolve) => setTimeout(resolve, 550));
+    const shown = last(viewer);
+    assert.ok(shown.phase === 'result' && shown.cards.R.card === 'SK' && shown.road.length === 1 && shown.outcome, 'after the delay viewers get the cards and the result');
+    assert.strictEqual(viewer.got.filter((message) => message.t === 'result').length, 1);
+    assert.strictEqual(viewer.got.filter((message) => message.t === 'me').pop().points, 10100);
+    count += 1; console.log('ok  with a stream delay, viewers get card faces and the result only after it');
+  } finally { engine.stop(); }
+})();
+
+delayed.then(() => console.log(count + ' checks passed'), (error) => { console.error(error); process.exit(1); });

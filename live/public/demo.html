@@ -61,7 +61,7 @@
     <button type="button" data-view="reader">讀牌器</button>
   </div>
   <div class="views">
-    <section class="view viewer on"><h2>觀眾（手機）<a id="viewerLink" target="_blank" rel="noopener">另開分頁</a></h2><iframe id="viewerFrame" title="觀眾"></iframe></section>
+    <section class="view viewer on"><h2>觀眾（手機）<button id="viewerMode" type="button" style="min-height:28px;padding:0 10px;font-size:13px">改看直播間半屏版</button><a id="viewerLink" target="_blank" rel="noopener">另開分頁</a></h2><iframe id="viewerFrame" title="觀眾"></iframe></section>
     <section class="view host"><h2>主持台（iPad）<a id="hostLink" target="_blank" rel="noopener">另開分頁</a></h2><iframe id="hostFrame" title="主持台"></iframe></section>
     <section class="view reader"><h2>讀牌器（牌桌上方的手機，模擬攝影機）<a id="readerLink" target="_blank" rel="noopener">另開分頁</a></h2><iframe id="readerFrame" title="讀牌器" allow="camera"></iframe></section>
   </div>
@@ -76,12 +76,15 @@
   // This page owns the demo engine; the three frames below connect to it directly.
   window.__demoEngine = Engine.createEngine(Engine.DEMO_OPTIONS);
   var table = (/[?&]table=(\w+)/.exec(location.search) || [])[1] || 'duel';
+  // The viewer pane shows either the full page or the half sheet inside a mock live room.
+  var room = /[?&]viewer=room\b/.test(location.search);
   function load() {
     var query = '?demo&table=' + table;
-    document.getElementById('viewerFrame').src = 'play.html' + query;
+    document.getElementById('viewerFrame').src = (room ? 'room.html' : 'play.html') + query;
+    document.getElementById('viewerMode').textContent = room ? '改看整頁版' : '改看直播間半屏版';
     document.getElementById('hostFrame').src = 'host.html' + query;
     document.getElementById('readerFrame').src = 'reader.html' + query + '&autostart';
-    document.getElementById('viewerLink').href = 'play.html' + query;
+    document.getElementById('viewerLink').href = (room ? 'room.html' : 'play.html') + query;
     document.getElementById('hostLink').href = 'host.html' + query;
     document.getElementById('readerLink').href = 'reader.html' + query;
     document.querySelectorAll('#gameTabs button').forEach(function (button) { button.classList.toggle('on', button.dataset.table === table); });
@@ -94,6 +97,7 @@
       load();
     });
   });
+  document.getElementById('viewerMode').addEventListener('click', function () { room = !room; load(); });
   document.getElementById('restart').addEventListener('click', function () { location.reload(); });
   document.querySelectorAll('#viewTabs button').forEach(function (button) {
     button.addEventListener('click', function () {

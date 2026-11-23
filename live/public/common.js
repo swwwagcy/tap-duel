@@ -45,7 +45,8 @@
       window.addEventListener('pagehide', function () { engine.disconnect(connection); });
       return { post: function (message) { engine.receive(connection, JSON.parse(JSON.stringify(message))); }, close: function () { engine.disconnect(connection); } };
     }
-    try { if (window.parent !== window && window.parent.__demoEngine) parentEngine = window.parent.__demoEngine; } catch (error) { /* another origin */ }
+    // The demo's engine lives in the outermost demo page; a page may sit one frame deeper (the room preview holds the sheet).
+    try { for (var up = window; up.parent !== up && !parentEngine;) { up = up.parent; if (up.__demoEngine) parentEngine = up.__demoEngine; } } catch (error) { /* another origin */ }
     if (parentEngine) { transport = overEngine(parentEngine); Live.embedded = true; document.documentElement.classList.add('embedded'); }
     else if (window.SharedWorker) {
       var worker = new SharedWorker('demo-worker.js');

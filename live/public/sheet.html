@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Tap Duel Live 半屏觀眾端</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  /* The viewer page as a half-height sheet under a live video (about 390 x 347). It carries no
+     video of its own: the stream above is the table. Every size follows the frame it is given,
+     so the same page fills a taller or wider frame. */
+  html, body { height: 100%; }
+  body { overflow: hidden; -webkit-user-select: none; user-select: none; background: var(--bg); }
+  .sheet { height: 100%; display: grid; grid-template-rows: auto minmax(0, 1.15fr) minmax(0, 1.25fr) auto auto; gap: 1.6vh; padding: 1.6vh 2.4vw; font-size: clamp(11px, 3.6vh, 15px); }
+  .toprow { display: grid; grid-template-columns: 1.25fr 1fr 1fr auto; gap: 1.6vw; align-items: stretch; }
+  .cell { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: .25em .6em; min-width: 0; display: flex; flex-direction: column; justify-content: center; line-height: 1.15; }
+  .cell small { color: var(--muted); font-size: .72em; }
+  .cell b { font-family: var(--font-num); font-size: 1em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cell b.up { color: var(--go); } .cell b.down { color: var(--red); }
+  .round-button { width: 2.5em; min-height: 0; padding: 0; border-radius: 50%; font-weight: 700; font-size: 1em; aspect-ratio: 1; align-self: center; }
+  .stage { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2.4vw; align-items: center; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 1.2vh 2.4vw; min-height: 0; }
+  .ring { height: 78%; max-height: 22vw; aspect-ratio: 1; border-radius: 50%; border: 3px solid var(--line); display: flex; flex-direction: column; align-items: center; justify-content: center; font-family: var(--font-num); font-weight: 700; font-size: 1.7em; line-height: 1; }
+  .ring small { font-family: var(--font-body); font-size: .36em; font-weight: 500; color: var(--muted); margin-top: .3em; }
+  .stage[data-phase="open"] .ring { border-color: var(--fg); }
+  .stage[data-phase="closed"] .ring { border-color: var(--wait); color: var(--wait); }
+  .stage[data-phase="dealing"] .ring { border-color: var(--go); color: var(--go); font-size: 1.05em; }
+  .stage[data-phase="result"] .ring, .stage[data-phase="void"] .ring { font-size: 1em; }
+  .hands { display: grid; grid-template-columns: 1fr 1fr; gap: 2.4vw; height: 100%; min-height: 0; }
+  .hand { display: grid; grid-template-rows: auto minmax(0, 1fr); gap: .3vh; min-height: 0; border-radius: 8px; padding: .4vh 1.2vw; border: 2px solid transparent; }
+  .hand h3 { margin: 0; font-size: .8em; display: flex; justify-content: space-between; }
+  .hand.red h3 { color: var(--red); } .hand.blue h3 { color: var(--blue); }
+  .hand.win { border-color: var(--go); background: rgba(55, 197, 138, .12); }
+  .hand .cards { display: flex; gap: 1.2vw; align-items: center; justify-content: center; min-height: 0; height: 100%; }
+  .hand .cards .cardface { width: auto; height: 100%; max-height: 13vh; font-size: clamp(11px, 4.4vh, 20px); }
+  .nine .hand .cards .cardface { font-size: clamp(10px, 3.5vh, 16px); }
+  .watch { position: absolute; left: 0; right: 0; bottom: .6vh; text-align: center; font-size: .78em; font-weight: 700; color: var(--go); pointer-events: none; }
+  .spots { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.6vw; min-height: 0; }
+  .spots.nine { grid-template-columns: repeat(6, 1fr); grid-template-rows: minmax(0, 1.6fr) minmax(0, 1fr); }
+  .spots.nine .spot { grid-column: span 2; }
+  .spots.nine .spot.wide { grid-column: span 3; flex-direction: row; gap: .6em; }
+  .spot { position: relative; min-height: 0; padding: .2em; border-radius: 10px; border: 2px solid var(--line); background: var(--surface-2); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .1em; line-height: 1.1; }
+  .spot .label { font-weight: 700; font-size: 1.25em; }
+  .spot .odds { font-size: .8em; color: var(--muted); font-family: var(--font-num); }
+  .spot .mine { position: absolute; top: .25em; right: .4em; font-size: .78em; font-weight: 700; color: var(--bg); background: var(--wait); border-radius: 999px; padding: 0 .5em; }
+  .spot .mine:empty { display: none; }
+  .spot .all { font-size: .7em; color: var(--muted); }
+  .spot.red { border-color: var(--red); } .spot.red .label { color: var(--red); }
+  .spot.blue { border-color: var(--blue); } .spot.blue .label { color: var(--blue); }
+  .spot.tie { border-color: var(--tie); } .spot.tie .label { color: var(--tie); }
+  .spot:disabled { opacity: .55; }
+  .spot.won { opacity: 1; background: rgba(55, 197, 138, .22); border-color: var(--go); }
+  .rail { display: grid; grid-template-columns: repeat(5, 1fr) 1.3fr; gap: 1.4vw; align-items: center; }
+  .rail .chip { min-height: 0; height: clamp(34px, 12vh, 50px); width: auto; aspect-ratio: 1; justify-self: center; border-radius: 50%; padding: 0; font-family: var(--font-num); font-weight: 700; font-size: .9em; border: 3px dashed var(--line); background: var(--surface); }
+  .rail .chip.on { border-style: solid; border-color: var(--wait); color: var(--wait); transform: translateY(-8%); }
+  .rail #undo { min-height: 0; height: clamp(30px, 10vh, 44px); font-size: .9em; padding: 0 .4em; }
+  .road { display: flex; gap: 3px; align-items: center; overflow: hidden; min-height: 1.5em; justify-content: flex-end; }
+  .road span { flex: none; width: 1.5em; height: 1.5em; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: .72em; font-weight: 700; color: #fff; }
+  .road .R, .road .red { background: var(--red); } .road .U, .road .blue { background: var(--blue); } .road .T, .road .tie { background: var(--tie); }
+  .road .none { width: auto; color: var(--muted); font-weight: 400; background: none; }
+  .help { position: fixed; inset: 0; background: var(--bg); z-index: 20; padding: 2.4vh 3vw; overflow-y: auto; font-size: 13px; }
+  .help h2 { margin: 0 0 6px; font-size: 16px; display: flex; justify-content: space-between; align-items: center; }
+  .help ul { margin: 0; padding-left: 1.2em; }
+  .help button { min-height: 32px; }
+  #toast { bottom: 12vh; font-size: 13px; }
+  .offline { font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="sheet" id="sheet">
+  <div class="toprow">
+    <div class="cell"><small>回合</small><b id="round">—</b></div>
+    <div class="cell"><small id="netLabel">本回合</small><b id="net">—</b></div>
+    <div class="cell"><small>點數</small><b id="points">—</b></div>
+    <button class="round-button" id="helpButton" type="button" aria-label="玩法說明">?</button>
+  </div>
+  <div class="stage" id="stage" data-phase="idle">
+    <div class="ring"><span id="count">—</span><small id="phase">待開始</small></div>
+    <div class="hands" id="hands"></div>
+    <div class="watch" id="watch" hidden>出牌中，請看上方直播</div>
+  </div>
+  <div class="spots" id="spots"></div>
+  <div class="rail"><span id="chips" style="display:contents"></span><button id="undo" type="button" disabled>撤回</button></div>
+  <div class="road" id="road"></div>
+</div>
+<div class="help" id="help" hidden>
+  <h2><span id="helpTitle">玩法</span><button id="helpClose" class="primary" type="button">關閉</button></h2>
+  <p id="summary" style="margin:0 0 6px"></p>
+  <ul id="rules"></ul>
+  <p class="muted" style="margin:8px 0 0">牌由上方直播揭曉，這裡的牌面會在直播翻牌之後才顯示。點數只是示範用。</p>
+  <p style="margin:8px 0 0"><button id="refill" type="button" hidden>補充點數</button></p>
+</div>
+<div id="toast" class="toast" role="status"></div>
+<script src="games.js"></script>
+<script src="engine.js"></script>
+<script src="common.js"></script>
+<script src="sheet.js"></script>
+</body>
+</html>

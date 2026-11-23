@@ -25,6 +25,8 @@
   .main { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 8px; min-height: 0; }
   .board { background: var(--surface); border-radius: 14px; padding: 10px; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; gap: 8px; min-height: 0; }
   .tabs button { min-height: 40px; }
+  /* Named rows: the tabs are hidden when the page is embedded, and the positions must still get the tall row. */
+  .board > .tabs { grid-row: 1; } .board > .zones { grid-row: 2; } .board > .guide { grid-row: 3; }
   .zones { display: grid; gap: 8px; min-height: 0; }
   .zones.duel { grid-template-columns: 1fr 1fr; }
   .zones.nine { grid-template-columns: repeat(3, 1fr); grid-template-rows: auto 1fr auto 1fr; }
@@ -159,6 +161,7 @@
       <h3 style="margin-top:0">本桌設定</h3>
       <label class="field" for="setOpen"><span>選擇秒數</span><input id="setOpen" type="number" min="5" max="120" inputmode="numeric"></label>
       <label class="field" for="setWait"><span>截止後等待秒數</span><input id="setWait" type="number" min="0" max="30" inputmode="numeric"></label>
+      <label class="field" for="setStream"><span>直播延遲秒數（觀眾端晚幾秒看到牌與結果）</span><input id="setStream" type="number" min="0" max="30" inputmode="numeric"></label>
       <label class="field" for="setAuto"><span>結束後自動開下一回合</span><input id="setAuto" type="checkbox"></label>
       <p class="muted" style="font-size:14px">等待秒數要大於直播的延遲，主持人在等待結束、畫面變綠之後才翻牌。改動從下一回合生效。</p>
       <p class="muted" style="font-size:14px">快捷鍵：Enter、PageDown 或右方向鍵＝主按鈕（藍牙簡報器可用）。</p>

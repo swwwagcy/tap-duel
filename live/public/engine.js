@@ -42,7 +42,10 @@
         sequence: 0,
         round: null,
         endsAt: 0,
-        settings: Object.assign({ openSeconds: 15, waitSeconds: 3, auto: false }, options.tableSettings || {}),
+        // streamDelay: seconds the live stream runs behind. Viewers are shown card faces and the
+        // result that much later, so their page never gets ahead of the video.
+        settings: Object.assign({ openSeconds: 15, waitSeconds: 3, auto: false, streamDelay: 0 }, options.tableSettings || {}),
+        revealAt: 0,
         history: [],
         road: [],
         frame: null,
@@ -95,37 +98,47 @@
       return totals;
     }
 
+    function later(ms, action) { if (ms > 0) timers.push(setTimeout(action, ms)); else action(); }
+
     function tableView(table, role) {
       const round = table.round;
       const cards = {};
+      // With a stream delay, viewers get no card faces while cards are being dealt, and a settled
+      // round still looks like dealing to them until the stream has caught up.
+      const held = role === 'viewer' && table.settings.streamDelay > 0;
+      const pending = held && (table.phase === 'result' || table.phase === 'void') && Date.now() < table.revealAt;
+      const phase = pending ? 'dealing' : table.phase;
+      const masked = held && phase === 'dealing';
       if (round) {
         Object.keys(round.cards).forEach(function (zone) {
           const entry = round.cards[zone];
-          cards[zone] = role === 'viewer'
-            ? { card: entry.card, source: entry.source, back: entry.back }
+          cards[zone] = masked ? { card: null, back: true }
+            : role === 'viewer' ? { card: entry.card, source: entry.source, back: entry.back }
             : { card: entry.card, source: entry.source, back: entry.back, score: entry.score, margin: entry.margin, top: entry.top, shot: entry.shot, uncertain: entry.uncertain, conflict: entry.conflict };
         });
       }
       const view = {
         id: table.id,
-        phase: table.phase,
+        phase: phase,
         roundNo: round ? round.no : null,
-        endsAt: table.endsAt,
+        endsAt: pending ? 0 : table.endsAt,
+        streamDelay: table.settings.streamDelay || 0,
         serverNow: Date.now(),
         cards: cards,
-        next: round && table.phase === 'dealing' ? Games.nextZone(table.game, cardMap(round)) : null,
-        outcome: round ? round.outcome : null,
-        road: table.road,
+        next: round && table.phase === 'dealing' && !masked ? Games.nextZone(table.game, cardMap(round)) : null,
+        outcome: round && !pending ? round.outcome : null,
+        road: pending && table.phase === 'result' ? table.road.slice(0, -1) : table.road,
         totals: totalsOf(round),
         pickers: round ? round.picks.size : 0,
         readerOnline: Date.now() - table.readerSeenAt < READER_TIMEOUT_MS,
-        stale: ['idle', 'result', 'void'].indexOf(table.phase) >= 0 ? staleZones(table) : [],
+        stale: ['idle', 'result', 'void'].indexOf(phase) >= 0 ? staleZones(table) : [],
         auto: table.settings.auto
       };
       if (role !== 'viewer') {
         view.settings = table.settings;
         view.history = table.history;
         view.readerInfo = table.readerInfo;
+        view.revealAt = table.revealAt;
         view.check = round && (table.phase === 'dealing') ? Games.checkComplete(table.game, cardMap(round)) : null;
         // What pressing confirm would settle, so the host reads the result before committing to it.
         view.preview = view.check && view.check.ok ? table.game.outcome(cardMap(round)).text : null;
@@ -186,6 +199,7 @@
 
     function openRound(table, force) {
       if (['idle', 'result', 'void'].indexOf(table.phase) < 0) return '這一回合還沒結束。';
+      if (Date.now() < table.revealAt) return '觀眾端還沒看到上一回合的結果，請再等 ' + Math.ceil((table.revealAt - Date.now()) / 1000) + ' 秒。';
       const stale = staleZones(table);
       if (stale.length && !force) return '桌上還有上一回合的牌（' + stale.map(function (zone) { return Games.zoneLabel(table.game, zone); }).join('、') + '），請先收掉。';
       table.round = newRound(table);
@@ -209,21 +223,24 @@
       const outcome = table.game.outcome(cards);
       round.outcome = outcome;
       let staked = 0, returned = 0;
+      // Points are settled now; viewers are told once the stream has had time to show the cards.
+      const delay = (table.settings.streamDelay || 0) * 1000;
+      table.revealAt = Date.now() + delay;
       round.picks.forEach(function (list, viewerId) {
         const viewer = viewers.get(viewerId);
         let mine = 0, back = 0;
         list.forEach(function (pick) { mine += pick.amount; back += table.game.returned(pick.spot, pick.amount, outcome); });
         if (viewer) viewer.points += back;
         staked += mine; returned += back;
-        sendToViewer(viewerId, { t: 'result', table: table.id, roundNo: round.no, staked: mine, returned: back, text: outcome.text });
+        later(delay, function () { sendToViewer(viewerId, { t: 'result', table: table.id, roundNo: round.no, staked: mine, returned: back, text: outcome.text }); sendMe(viewerId); });
       });
       table.road.push(table.game.road(outcome));
       if (table.road.length > ROAD_LIMIT) table.road.shift();
       pushHistory(table, { roundNo: round.no, text: outcome.text, road: table.game.road(outcome), staked: staked, returned: returned });
       table.phase = 'result';
-      table.endsAt = Date.now() + RESULT_HOLD_MS;
+      table.endsAt = Date.now() + delay + RESULT_HOLD_MS;
       broadcastTable(table);
-      round.picks.forEach(function (list, viewerId) { sendMe(viewerId); });
+      if (delay > 0) later(delay, function () { if (table.round === round) broadcastTable(table); });
       return null;
     }
 
@@ -362,6 +379,7 @@
         table.settings = {
           openSeconds: isFinite(open) ? Math.min(120, Math.max(5, open)) : table.settings.openSeconds,
           waitSeconds: isFinite(wait) ? Math.min(30, Math.max(0, wait)) : table.settings.waitSeconds,
+          streamDelay: message.streamDelay != null && isFinite(Number(message.streamDelay)) ? Math.min(30, Math.max(0, Math.round(Number(message.streamDelay)))) : (table.settings.streamDelay || 0),
           auto: !!message.auto
         };
         audit({ action: 'settings', table: table.id, settings: table.settings, by: socket.address });
@@ -562,7 +580,7 @@
 
   // Settings for demo mode (in the browser, no staff key, a few demo viewers, faster rounds).
   // demo-worker.js and demo.html both use this one copy.
-  const DEMO_OPTIONS = { staffKeyMatches: function () { return true; }, bots: 5, tableSettings: { openSeconds: 12, waitSeconds: 2, auto: true } };
+  const DEMO_OPTIONS = { staffKeyMatches: function () { return true; }, bots: 5, tableSettings: { openSeconds: 12, waitSeconds: 2, auto: true, streamDelay: 2 } };
 
   return { createEngine: createEngine, DEMO_OPTIONS: DEMO_OPTIONS };
 });
