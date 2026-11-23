@@ -2,7 +2,10 @@
 (function () {
   'use strict';
   var $ = Live.$;
-  var state = { tableId: ((/[?&]table=(\w+)/.exec(location.search) || [])[1] || Live.store.get('tdl-host-table', 'duel')), table: null, tables: [], pickerZone: null, pickSuit: null, voidArmedUntil: 0, notes: [] };
+  var state = { tableId: ((/[?&]table=(\w+)/.exec(location.search) || [])[1] || Live.store.get('tdl-host-table', 'duel')), table: null, tables: [], pickerZone: null, pickSuit: null, voidArmedUntil: 0, notes: [], situation: '', since: 0, readyAt: 0, sound: Live.store.get('tdl-host-sound', false) };
+  var CHECK_PAUSE_MS = 1200;      // after the last card arrives, confirm stays off this long: time to look
+  // How long each situation may wait on the host before the page starts reminding (ms).
+  var NUDGE_AFTER = { confirm: 6000, deal: 15000, fix: 8000, clear: 6000, start: 20000 };
   var link = null;
 
   function start(key) {
@@ -115,6 +118,8 @@
       $('totalBlue').textContent = sideTotal(cards, ['U1', 'U2', 'U3']);
       $('totalRed').textContent = sideTotal(cards, ['R1', 'R2', 'R3']);
     }
+    track();
+    renderSteps();
     renderGuide();
     renderTotals();
     $('readerState').textContent = table.readerOnline ? '讀牌器已連線' + (table.readerInfo && table.readerInfo.text ? '・' + table.readerInfo.text : '') : '讀牌器未連線（可手動選牌）';
@@ -125,6 +130,75 @@
     if (state.pickerZone) renderPicker();
     tick();
   }
+
+  // One word for what the host is expected to do next. When it changes, the clock for reminders
+  // restarts and a sound may play.
+  function situationOf(table) {
+    var stale = (table.stale || []).length > 0, phase = table.phase;
+    if (phase === 'open') return 'open';
+    if (phase === 'closed') return 'closed';
+    if (phase === 'dealing') {
+      var bad = game().zones.some(function (zone) { var entry = table.cards[zone.id]; return entry && (entry.uncertain || entry.conflict); });
+      if (bad) return 'fix';
+      if (table.check && table.check.ok) return 'confirm';
+      return table.next ? 'deal:' + table.next : 'fix';
+    }
+    if (stale) return 'clear';
+    return table.auto && phase !== 'idle' ? 'auto' : 'start';
+  }
+  function track() {
+    var now = situationOf(state.table), before = state.situation;
+    if (now === before) return;
+    state.situation = now; state.since = Date.now();
+    if (now === 'confirm') state.readyAt = Date.now();
+    var kind = now.split(':')[0], was = before.split(':')[0];
+    if (kind === 'deal' && was !== 'deal' && was !== 'fix' && was !== 'confirm') cue('go');
+    else if (kind === 'confirm') cue('ready');
+    else if (kind === 'fix') cue('bad');
+    else if (kind === 'clear' && was !== 'clear') cue('done');
+    if (kind === 'confirm') setTimeout(renderButtons, CHECK_PAUSE_MS + 30);
+  }
+  function summary(table) {
+    return game().zones.filter(function (zone) { return table.cards[zone.id] && table.cards[zone.id].card; }).map(function (zone) { return zone.label + ' ' + Games.cardLabel(table.cards[zone.id].card); }).join('、');
+  }
+  function renderSteps() {
+    var kind = state.situation.split(':')[0];
+    var at = { start: 0, auto: 0, open: 1, closed: 2, deal: 3, fix: 3, confirm: 4, clear: 5 }[kind];
+    $('steps').querySelectorAll('li').forEach(function (item, index) {
+      item.className = index < at ? 'done' : index === at ? 'now' + (kind === 'closed' || kind === 'fix' || kind === 'clear' ? ' wait' : kind === 'deal' || kind === 'confirm' ? ' go' : '') : '';
+    });
+  }
+  // Reminders: the thing to press pulses once the host has kept it waiting.
+  function renderNudges() {
+    var kind = state.situation.split(':')[0], waited = Date.now() - state.since, limit = NUDGE_AFTER[kind];
+    var due = !!limit && waited > limit && $('picker').hidden && $('drawer').hidden;
+    $('mainButton').classList.toggle('nudge', due && (kind === 'confirm' || kind === 'start') && !$('mainButton').disabled);
+    $('guide').classList.toggle('nudge', due && (kind === 'deal' || kind === 'fix' || kind === 'clear'));
+    if (due && !state.nudged) { state.nudged = true; cue('remind'); }
+    if (!due) state.nudged = false;
+  }
+
+  /* ---------------- sound and vibration ---------------- */
+  // Off until the host turns it on: a live microphone would pick the tones up.
+  var audio = null;
+  var CUES = { go: [[660, 0], [880, 0.14]], ready: [[880, 0]], bad: [[330, 0], [262, 0.16]], done: [[523, 0]], remind: [[740, 0], [740, 0.2]] };
+  function cue(name) {
+    if (navigator.vibrate) { try { navigator.vibrate(name === 'bad' ? [80, 60, 80] : 60); } catch (error) { /* not allowed here */ } }
+    if (!state.sound) return;
+    try {
+      audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+      if (audio.state === 'suspended') audio.resume();
+      CUES[name].forEach(function (tone) {
+        var oscillator = audio.createOscillator(), gain = audio.createGain(), at = audio.currentTime + tone[1];
+        oscillator.frequency.value = tone[0]; oscillator.connect(gain); gain.connect(audio.destination);
+        gain.gain.setValueAtTime(0.0001, at); gain.gain.exponentialRampToValueAtTime(0.25, at + 0.02); gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.13);
+        oscillator.start(at); oscillator.stop(at + 0.15);
+      });
+    } catch (error) { /* no sound on this device */ }
+  }
+  function showSound() { $('soundButton').textContent = '提示音 ' + (state.sound ? '開' : '關'); $('soundButton').classList.toggle('on', state.sound); $('soundButton').setAttribute('aria-pressed', String(state.sound)); }
+  $('soundButton').addEventListener('click', function () { state.sound = !state.sound; Live.store.set('tdl-host-sound', state.sound); showSound(); if (state.sound) cue('ready'); });
+  showSound();
 
   function cardsOf(table) {
     var out = {};
@@ -138,7 +212,7 @@
 
   function renderGuide() {
     var table = state.table, guide = $('guide'), current = game();
-    guide.classList.remove('bad');
+    guide.classList.remove('bad'); guide.classList.remove('go');
     var stale = table.stale || [];
     if (stale.length) {
       guide.classList.add('bad');
@@ -155,9 +229,14 @@
     if (unread.length) { guide.classList.add('bad'); guide.textContent = unread.map(function (zone) { return zone.label; }).join('、') + ' 認不出來：點那個牌位選牌。'; return; }
     if (table.next) {
       var waiting = table.cards[table.next] && table.cards[table.next].back;
-      guide.textContent = (waiting ? '請翻開：' : '下一張：') + Games.zoneLabel(current, table.next); return;
+      guide.innerHTML = Live.escape((waiting ? '請翻開：' : '請發牌到：') + Games.zoneLabel(current, table.next)) + (table.readerOnline ? '' : '<small>讀牌器沒有連線：點那個牌位，用手選牌。</small>');
+      return;
     }
-    if (check && check.ok) { guide.textContent = '牌已到齊，核對後按「確認結果」。'; return; }
+    if (check && check.ok) {
+      guide.classList.add('go');
+      guide.innerHTML = '到齊：' + Live.escape(summary(table)) + ' → <b>' + Live.escape(table.preview || '') + '</b><small>核對牌面與結果，沒問題就按「確認」。有錯就點那個牌位改。</small>';
+      return;
+    }
     guide.classList.add('bad');
     if (check && check.duplicate) guide.textContent = Games.cardLabel(check.duplicate) + ' 出現兩次，請改正。';
     else if (check && check.extra.length) guide.textContent = '依規則不該有牌：' + check.extra.map(function (zone) { return Games.zoneLabel(current, zone); }).join('、') + '。請移除或取消回合。';
@@ -177,7 +256,11 @@
       main.textContent = !blocked ? '開始新回合' : armed ? '再按一次：不收牌直接開始' : '桌上還有牌，先收掉';
       main.disabled = false;
     }
-    else if (phase === 'dealing') { main.textContent = '確認結果'; main.disabled = !(table.check && table.check.ok); }
+    else if (phase === 'dealing') {
+      var ready = !!(table.check && table.check.ok), looking = ready && Date.now() < state.readyAt + CHECK_PAUSE_MS;
+      main.textContent = !ready ? '確認結果（牌還沒到齊）' : looking ? '請核對…' : '確認：' + (table.preview || '結果');
+      main.disabled = !ready || looking;
+    }
     else { main.textContent = '等待截止'; main.disabled = true; }
     var canVoid = phase === 'open' || phase === 'closed' || phase === 'dealing';
     var armed = canVoid && Date.now() < state.voidArmedUntil;
@@ -204,6 +287,7 @@
     if (!table) return;
     var counting = table.phase === 'open' || table.phase === 'closed' || ((table.phase === 'result' || table.phase === 'void') && table.auto);
     $('count').textContent = counting ? Live.secondsLeft(table.endsAt) : '';
+    renderNudges();
     if (state.voidArmedUntil && Date.now() > state.voidArmedUntil) { state.voidArmedUntil = 0; renderButtons(); }
     if (state.openArmedUntil && Date.now() > state.openArmedUntil) { state.openArmedUntil = 0; renderButtons(); }
     if ((table.stale || []).length) $('count').textContent = '';
@@ -262,9 +346,10 @@
   document.addEventListener('keydown', function (event) {
     if (event.target.matches && event.target.matches('input, select, textarea')) return;
     if (!$('picker').hidden || !$('drawer').hidden) return;
-    if (event.key === 'Enter' || event.key === 'PageDown' || event.key === 'ArrowRight') { event.preventDefault(); primary(); }
+    // A held key repeats; one press must be one action, or opening a round could run on into the next step.
+    if (event.key === 'Enter' || event.key === 'PageDown' || event.key === 'ArrowRight') { event.preventDefault(); if (!event.repeat) primary(); }
   });
-  $('helpButton').addEventListener('click', function () { Live.toast('Enter、PageDown 或右方向鍵＝主按鈕。點牌位可以手動改牌。'); });
+  $('helpButton').addEventListener('click', function () { Live.toast('Enter、PageDown 或右方向鍵＝主按鈕。點牌位可以手動改牌。久未操作時該按的地方會閃爍；「提示音」打開後換階段會有聲音。'); });
 
   /* ---------------- settings drawer ---------------- */
   function fillSettings() {

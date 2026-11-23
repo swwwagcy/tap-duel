@@ -20,6 +20,13 @@
   var CHECK_TICKS = 7;             // a held card is compared with how it looked, about once a second
   var SAME_CARD = 0.9;             // likeness (1 = identical pattern) above which it is the same card, whatever the light
   var DOUBT_ROUNDS = 4;            // looks in a row that cannot confirm a held card before it is let go
+  // "Is there a card" is asked of the shape, not only of how much of the position differs from
+  // the table: a printed outline, a logo, a glint or the edge of a shadow also differ. Below
+  // CARD_COVERAGE the position is taken for a card only if something card-sized and solid is found.
+  var CARD_COVERAGE = 0.15;        // a card fills at least this share of its position
+  var MIN_CARD_SHARE = 0.25;       // and is at least this tall, as a share of the position's height
+  var SOLID_SHARE = 0.5;           // and this much of its middle differs from the table (an outline is mostly table)
+  var NOT_A_CARD_FRAMES = 6;       // still frames with no card-like thing before the position counts as empty
   var FRAME_SEND_MS = 700;
   var WORK_MAX_WIDTH = 1920;
   var RAW_MAX_WIDTH = 2560;        // with a slanted camera, more of the camera's detail is kept before straightening
@@ -104,7 +111,7 @@
   }
   function resetZoneStates() {
     state.zoneState = {};
-    game().zones.forEach(function (zone) { state.zoneState[zone.id] = { status: 'empty', still: 0, wait: 0, emptyCount: EMPTY_FRAMES, reads: [], prev: null, result: null, reported: 'empty', lastMessage: null, found: null, held: null, check: false, sinceCheck: 0, checkWait: 0, doubt: 0, rival: null, same: null }; });
+    game().zones.forEach(function (zone) { state.zoneState[zone.id] = { status: 'empty', still: 0, wait: 0, emptyCount: EMPTY_FRAMES, reads: [], prev: null, result: null, reported: 'empty', lastMessage: null, found: null, noCard: 0, held: null, check: false, sinceCheck: 0, checkWait: 0, doubt: 0, rival: null, same: null }; });
   }
   function rectOf(zoneId) {
     var z = state.zones[zoneId];
@@ -175,6 +182,23 @@
     return out;
   }
   function likeness(a, b) { var total = 0; for (var index = 0; index < a.length; index++) total += a[index] * b[index]; return total / a.length; }
+
+  // How much of the middle of a found shape differs clearly from the table. A card is solid; the
+  // printed outline of a card position is mostly table inside.
+  function solidShare(frame, found, table) {
+    var solid = 0, total = 0, data = frame.data;
+    for (var row = 0; row < 12; row++) for (var col = 0; col < 9; col++) {
+      var x = Math.max(0, Math.min(frame.width - 1, Math.round(found.cx + ((col + 0.5) / 9 - 0.5) * found.w * 0.7)));
+      var y = Math.max(0, Math.min(frame.height - 1, Math.round(found.cy + ((row + 0.5) / 12 - 0.5) * found.h * 0.7)));
+      var at = (y * frame.width + x) * 4;
+      if (Math.abs(data[at] - table[0]) + Math.abs(data[at + 1] - table[1]) + Math.abs(data[at + 2] - table[2]) > 60) solid++;
+      total++;
+    }
+    return solid / total;
+  }
+  function cardLike(frame, found, rect, table) {
+    return !!found && found.h >= rect.h * MIN_CARD_SHARE && solidShare(frame, found, table) >= SOLID_SHARE;
+  }
 
   function flatSignature(colour, length) {
     var out = new Float32Array(length);
@@ -358,7 +382,6 @@
         return;
       }
       zs.emptyCount = 0;
-      if (covered < defaults.presence) { zs.why = '變化太小，看不出有牌'; return; }
       if (moved > defaults.stillness) {
         zs.still = 0; zs.reads = [];
         // Something moving over a card that was read does not undo the reading; it is checked once things are still.
@@ -366,6 +389,19 @@
         zs.why = '畫面在動，等牌放穩'; zs.attempts = 0; zs.status = 'busy'; return;
       }
       zs.still++;
+      // Little of the position is covered: a card only if something card-sized and solid is there.
+      // Otherwise (mat markings, a glint, a shadow's edge, or what is left once the card is gone)
+      // the position empties, whatever was read there before.
+      if (covered < CARD_COVERAGE) {
+        var thing = covered >= defaults.presence ? R.locate(frame, { colour: table }, rect) : null;
+        if (!cardLike(frame, thing, rect, table)) {
+          zs.reads = []; zs.attempts = 0; zs.height = 0;
+          zs.why = zs.status === 'empty' ? '' : '牌位裡的東西不像一張牌，視為已收走';
+          if (++zs.noCard >= (held ? EMPTY_FRAMES_HELD : NOT_A_CARD_FRAMES) && zs.status !== 'empty') { letGo(zs); zs.status = 'empty'; zs.result = null; zs.why = ''; report(zone.id, { state: 'empty' }); }
+          return;
+        }
+      }
+      zs.noCard = 0;
       if (held) { confirmHeld(zone.id, zs, rect, frame, table); return; }
       if (zs.status === 'back' || zs.status === 'unsure') {
         // Face down or not read yet: look again every so often (a flip also shows up as movement).

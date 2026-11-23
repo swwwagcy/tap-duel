@@ -158,4 +158,16 @@ check('sign-ins and round actions are written to the audit trail, a locked sign-
   } finally { engine.stop(); }
 });
 
+check('staff are told what confirming would settle; viewers are not', () => withEngine((engine, open) => {
+  const host = open(); host.say({ t: 'hello', role: 'host', key: 'k' }); host.say({ t: 'watch', table: 'duel' });
+  const viewer = open(); viewer.say({ t: 'hello', role: 'viewer' }); viewer.say({ t: 'watch', table: 'duel' });
+  engine.tables.duel.phase = 'dealing'; engine.tables.duel.round = { no: 'T-2', picks: new Map(), cards: {}, warned: {}, outcome: null };
+  host.say({ t: 'setCard', table: 'duel', zone: 'R', card: 'SK' });
+  const last = (who) => who.got.filter((message) => message.t === 'table').pop().table;
+  assert.strictEqual(last(host).preview, null, 'no preview until the cards are complete');
+  host.say({ t: 'setCard', table: 'duel', zone: 'U', card: 'H9' });
+  assert.ok(/紅方/.test(last(host).preview), 'preview names the winner: ' + last(host).preview);
+  assert.ok(!('preview' in last(viewer)), 'viewers get no preview');
+}));
+
 console.log(count + ' checks passed');

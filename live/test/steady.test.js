@@ -37,11 +37,16 @@ const server = http.createServer((request, response) => {
     const table = DemoCamera.source(1920, 1080, { still: true });
     const view = document.createElement('canvas'); view.width = 1920; view.height = 1080;
     const context = view.getContext('2d');
-    const lens = { gain: 1, shadow: null, hand: null };
+    const lens = { gain: 1, shadow: null, hand: null, marks: [] };
     setInterval(() => {
       context.filter = 'brightness(' + lens.gain + ')';
       context.drawImage(table.canvas, 0, 0);
       context.filter = 'none';
+      // Things printed on the mat: a logo patch, or the outline of where a card goes.
+      lens.marks.forEach(mark => {
+        if (mark.kind === 'patch') { context.fillStyle = '#d9c27a'; context.fillRect(mark.x, mark.y, mark.w, mark.h); }
+        else { context.strokeStyle = '#e8e2c8'; context.lineWidth = mark.line; context.strokeRect(mark.x, mark.y, mark.w, mark.h); }
+      });
       if (lens.shadow) { context.fillStyle = 'rgba(0,0,0,' + lens.shadow.alpha + ')'; context.fillRect(lens.shadow.x, 0, lens.shadow.w, 1080); }
       if (lens.hand) { context.fillStyle = '#c99a7a'; context.beginPath(); context.ellipse(lens.hand.x, lens.hand.y, lens.hand.rx, lens.hand.ry, 0.3, 0, Math.PI * 2); context.fill(); }
     }, 40);
@@ -117,6 +122,26 @@ const server = http.createServer((request, response) => {
   await change('a hand covers the card and takes it away: the position empties', async () => {
     await lens({ hand: { x: red.x, y: red.y, rx: 220, ry: 260 } }); await wait(600); await place([]); await wait(500); await lens({ hand: null });
   }, now => now === 'empty', 8000);
+
+  // A mat is rarely plain: with a logo or a printed card outline inside the position, a card must
+  // still be read, and the position must still empty when the card is taken away.
+  const cardH = 420, cardW = cardH * 0.716;
+  const mats = [
+    ['a logo in the corner of the position', [{ kind: 'patch', x: red.x + 130, y: red.y - 290, w: 130, h: 70 }]],
+    ['a printed outline where the card goes', [{ kind: 'outline', x: red.x + 8 - cardW * 0.56, y: red.y - 6 - cardH * 0.56, w: cardW * 1.12, h: cardH * 1.12, line: 7 }]]
+  ];
+  for (const [name, marks] of mats) {
+    await lens({ marks });
+    await wait(2500);
+    const before = await status();
+    console.log((before === 'empty' ? 'ok  ' : 'BAD ') + 'mat with ' + name + ', no card: ' + before);
+    if (before !== 'empty') failed = true;
+    await place([{ card: 'S9' }]);
+    await change('mat with ' + name + ': the card is read', async () => {}, now => now === 'card:S9', 8000);
+    await change('mat with ' + name + ': taken away, the position empties', () => place([]), now => now === 'empty', 6000);
+    await lens({ marks: [] });
+    await wait(600);
+  }
 
   if (errors.length) { console.log('page errors: ' + errors.join(' | ')); failed = true; }
   await browser.close(); server.close();

@@ -127,6 +127,8 @@
         view.history = table.history;
         view.readerInfo = table.readerInfo;
         view.check = round && (table.phase === 'dealing') ? Games.checkComplete(table.game, cardMap(round)) : null;
+        // What pressing confirm would settle, so the host reads the result before committing to it.
+        view.preview = view.check && view.check.ok ? table.game.outcome(cardMap(round)).text : null;
       }
       return view;
     }

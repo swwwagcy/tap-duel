@@ -75,7 +75,14 @@ const card = (socket, table, zone, value) => socket.send(JSON.stringify({ t: 'zo
   assert.strictEqual(await host.evaluate(() => document.getElementById('mainButton').disabled), true, 'confirm must wait for both cards');
   card(reader, 'duel', 'R', 'SK');
   card(reader, 'duel', 'U', 'H9');
+  // Guard rails for a busy host: the button first says to look, then names what confirming will settle.
+  await until(() => host.evaluate(() => document.querySelector('#steps li.now').dataset.step === 'confirm'), 'the progress strip reaches "confirm"');
+  const looking = await host.evaluate(() => ({ text: document.getElementById('mainButton').textContent, off: document.getElementById('mainButton').disabled }));
+  assert.ok(looking.off && looking.text === '請核對…', 'confirm pauses for a look once the cards are in: ' + JSON.stringify(looking));
   await until(() => host.evaluate(() => !document.getElementById('mainButton').disabled), 'confirm enabled');
+  const ready = await host.evaluate(() => ({ button: document.getElementById('mainButton').textContent, guide: document.getElementById('guide').textContent }));
+  assert.ok(/^確認：.*紅方/.test(ready.button), 'the button names the result it will settle: ' + ready.button);
+  assert.ok(ready.guide.includes('♠K') && ready.guide.includes('♥9'), 'the guide lists the cards to check: ' + ready.guide);
   await host.click('#mainButton');
   await until(async () => (await points()) === 10100, 'duel payout 9700 + 400');
   const banner = await viewer.textContent('#banner');
