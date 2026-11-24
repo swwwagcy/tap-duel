@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="420mm" height="297mm" viewBox="0 0 420 297" font-family="'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', 'WenQuanYi Zen Hei', sans-serif">
+<rect width="420" height="297" fill="#1f5e3a"/>
+<path d="M44.80000000000001 34H30.80000000000001V48" fill="none" stroke="#e9dfb6" stroke-width="1.6" stroke-linecap="round"/><path d="M375.2 34H389.2V48" fill="none" stroke="#e9dfb6" stroke-width="1.6" stroke-linecap="round"/><path d="M44.80000000000001 235.6H30.80000000000001V221.6" fill="none" stroke="#e9dfb6" stroke-width="1.6" stroke-linecap="round"/><path d="M375.2 235.6H389.2V221.6" fill="none" stroke="#e9dfb6" stroke-width="1.6" stroke-linecap="round"/>
+<text x="210" y="29" text-anchor="middle" font-size="5" fill="#b9c9bd">▲ 讀牌器畫面的上方　畫面四個角對準四個角標，手機橫放</text>
+<rect x="67.00" y="63.68" width="135.48" height="142.25" rx="6" fill="none" stroke="#e9584c" stroke-width="1.8"/>
+<path d="M101.73600000000002 98.30000000000001V89.30000000000001H110.73600000000002" fill="none" stroke="#2a6c46" stroke-width="0.9"/><path d="M167.73600000000002 98.30000000000001V89.30000000000001H158.73600000000002" fill="none" stroke="#2a6c46" stroke-width="0.9"/><path d="M101.73600000000002 171.3V180.3H110.73600000000002" fill="none" stroke="#2a6c46" stroke-width="0.9"/><path d="M167.73600000000002 171.3V180.3H158.73600000000002" fill="none" stroke="#2a6c46" stroke-width="0.9"/>
+<text x="134.73600000000002" y="57.18" text-anchor="middle" font-size="14" font-weight="700" fill="#e9584c">紅方</text>
+<rect x="217.53" y="63.68" width="135.48" height="142.25" rx="6" fill="none" stroke="#4f8ff7" stroke-width="1.8"/>
+<path d="M252.264 98.30000000000001V89.30000000000001H261.264" fill="none" stroke="#2a6c46" stroke-width="0.9"/><path d="M318.264 98.30000000000001V89.30000000000001H309.264" fill="none" stroke="#2a6c46" stroke-width="0.9"/><path d="M252.264 171.3V180.3H261.264" fill="none" stroke="#2a6c46" stroke-width="0.9"/><path d="M318.264 171.3V180.3H309.264" fill="none" stroke="#2a6c46" stroke-width="0.9"/>
+<text x="285.264" y="57.18" text-anchor="middle" font-size="14" font-weight="700" fill="#4f8ff7">藍方</text>
+<line x1="210" y1="94.47999999999999" x2="210" y2="175.11999999999998" stroke="#2a6c46" stroke-width="0.9"/>
+<text x="70.0" y="265.6" text-anchor="middle" font-size="6.2" fill="#f3efdc">① 牌正面朝上，放進框裡</text>
+<text x="210.0" y="265.6" text-anchor="middle" font-size="6.2" fill="#f3efdc">② 手離開，等主持台出現這張牌</text>
+<text x="350.0" y="265.6" text-anchor="middle" font-size="6.2" fill="#f3efdc">③ 確認後，把牌收到墊子外面</text>
+<text x="210" y="276.6" text-anchor="middle" font-size="4.6" fill="#b9c9bd">主持人坐這一側　｜　框裡只放這一局的牌，其他東西不要放進四個角標圍起來的範圍</text>
+</svg>
