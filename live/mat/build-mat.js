@@ -29,7 +29,7 @@ function mat(size, words) {
   // The camera's picture: a bright corner mark at each corner, well away from the card positions.
   const corner = (x, y, dx, dy) => `<path d="M${x + dx * 14} ${y}H${x}V${y + dy * 14}" fill="none" stroke="${COLOUR.line}" stroke-width="1.6" stroke-linecap="round"/>`;
   add(corner(fx, fy, 1, 1) + corner(fx + FRAME.w, fy, -1, 1) + corner(fx, fy + FRAME.h, 1, -1) + corner(fx + FRAME.w, fy + FRAME.h, -1, -1));
-  add(`<text x="${W / 2}" y="${fy - 4}" text-anchor="middle" font-size="${(size.text * 0.8).toFixed(1)}" fill="${COLOUR.dim}">▲ 讀牌器畫面的上方　畫面四個角對準四個角標，手機橫放</text>`);
+  add(`<text x="${W / 2}" y="${fy - 2.5}" text-anchor="middle" font-size="${(size.text * 0.8).toFixed(1)}" fill="${COLOUR.dim}">▲ 這一邊是讀牌器畫面的上方　手機橫放，畫面四個角對準四個角標</text>`);
   [['R', COLOUR.red, words[0]], ['U', COLOUR.blue, words[1]]].forEach(([id, colour, word]) => {
     const z = zone(id), cx = z.x + z.w / 2, cy = z.y + z.h / 2;
     // A coloured border outside the area the reader looks at (the position plus 8% all round),
@@ -41,27 +41,39 @@ function mat(size, words) {
     const tick = (sx, sy) => `<path d="M${cx + sx * hw} ${cy + sy * (hh - t)}V${cy + sy * hh}H${cx + sx * (hw - t)}" fill="none" stroke="${COLOUR.faint}" stroke-width="0.9"/>`;
     add(tick(-1, -1) + tick(1, -1) + tick(-1, 1) + tick(1, 1));
   });
-  // The two names, as large as the space between the positions allows, each with an arrow to its
-  // side. They lie outside the areas the reader looks at.
-  const middle = fx + FRAME.w / 2, between = (layout.U[0] - layout.R[0] - layout.R[2]) * FRAME.w - 2 * layout.R[2] * FRAME.w * 0.13 - 8;
-  [[words[0], COLOUR.red, 0.34, -1], [words[1], COLOUR.blue, 0.8, 1]].forEach(([word, colour, at, side]) => {
-    const size = Math.min(FRAME.h * 0.3, between / word.length), base = fy + FRAME.h * at, ay = base + size * 0.3;
-    add(`<text x="${middle}" y="${base.toFixed(2)}" text-anchor="middle" font-size="${size.toFixed(1)}" font-weight="700" fill="${colour}" stroke="${colour}" stroke-width="${(size * 0.028).toFixed(2)}" stroke-linejoin="round">${word}</text>`);
-    add(`<path d="M${middle + side * 16} ${ay}l${-side * 9} -5v10z" fill="${colour}"/><path d="M${middle - side * 10} ${ay}H${middle + side * 8}" stroke="${colour}" stroke-width="2.4"/>`);
+  // Each name sits right above its own position, like a heading, outside the camera's picture.
+  // Nothing has to be matched up by colour or by arrow, so it reads the same printed in black
+  // and white.
+  [['R', words[0], COLOUR.red], ['U', words[1], COLOUR.blue]].forEach(([id, word, colour]) => {
+    const z = zone(id), cx = z.x + z.w / 2, height = Math.min(size.label, (z.w * 1.15) / word.length);
+    // A plate in the side's colour as wide as the position's border, with the name in near-white:
+    // the name stays light on dark whether the sheet is printed in colour or in black and white.
+    const plateW = z.w * (size.plate || 1.26), plateH = height * 1.14, base = fy - size.labelGap;
+    add(`<rect x="${(cx - plateW / 2).toFixed(2)}" y="${(base - height * 0.93).toFixed(2)}" width="${plateW.toFixed(2)}" height="${plateH.toFixed(2)}" rx="${(height * 0.12).toFixed(1)}" fill="${colour}"/>`);
+    add(`<text x="${cx.toFixed(2)}" y="${base.toFixed(2)}" text-anchor="middle" font-size="${height.toFixed(1)}" font-weight="700" fill="#fffaf0" stroke="#fffaf0" stroke-width="${(height * 0.03).toFixed(2)}" stroke-linejoin="round">${word}</text>`);
   });
-  // The host's side: the three things to remember.
-  const by = fy + FRAME.h + size.stripGap;
+  add(`<line x1="${fx + FRAME.w / 2}" y1="${fy + FRAME.h * 0.2}" x2="${fx + FRAME.w / 2}" y2="${fy + FRAME.h * 0.8}" stroke="${COLOUR.faint}" stroke-width="0.9"/>`);
+  // What the host has to remember. On the large sheets it runs along the host's side; on A4
+  // there is no room below, so it sits between the two names.
   const steps = ['① 牌正面朝上，放進框裡', '② 手離開，等主持台出現這張牌', '③ 確認後，把兩張牌都收走'];
-  steps.forEach((text, index) => add(`<text x="${(W * (index * 2 + 1) / 6).toFixed(1)}" y="${by}" text-anchor="middle" font-size="${size.text}" fill="${COLOUR.text}">${text}</text>`));
-  add(`<text x="${W / 2}" y="${by + size.text * 1.7}" text-anchor="middle" font-size="${(size.text * 0.74).toFixed(1)}" fill="${COLOUR.dim}">主持人坐這一側　｜　四個角標圍起來的範圍裡只放這一局的兩張牌，牌堆與用過的牌放在外面</text>`);
+  if (size.stripGap) {
+    const by = fy + FRAME.h + size.stripGap;
+    steps.forEach((text, index) => add(`<text x="${(W * (index * 2 + 1) / 6).toFixed(1)}" y="${by}" text-anchor="middle" font-size="${size.text}" fill="${COLOUR.text}">${text}</text>`));
+    add(`<text x="${W / 2}" y="${by + size.text * 1.7}" text-anchor="middle" font-size="${(size.text * 0.74).toFixed(1)}" fill="${COLOUR.dim}">主持人坐這一側　｜　四個角標圍起來的範圍裡只放這一局的兩張牌，牌堆與用過的牌放在外面</text>`);
+  } else {
+    const top = fy - size.labelGap - size.label * 0.86;
+    steps.concat(['框裡只放這一局的兩張牌']).forEach((text, index) => add(`<text x="${W / 2}" y="${(top + size.text * (1 + index * 1.55)).toFixed(2)}" text-anchor="middle" font-size="${size.text}" fill="${index < 3 ? COLOUR.text : COLOUR.dim}">${text}</text>`));
+  }
   add('</svg>');
   return out.join('\n');
 }
 
 const SIZES = {
-  a4: { w: 297, h: 210, frameTop: 20, stripGap: 13, text: 4.6 },
-  a3: { w: 420, h: 297, frameTop: 52, stripGap: 30, text: 6.2 },
-  '600x350': { w: 600, h: 350, frameTop: 72, stripGap: 40, text: 6.6 }
+  // label: height of the two names, mm; labelGap: from their baseline down to the camera's picture.
+  // plate: width of the name's plate as a share of the position's width (narrow on A4, where the reminders sit between the two).
+  a4: { w: 297, h: 210, frameTop: 44.5, label: 31, labelGap: 10.5, plate: 0.74, text: 4.2 },
+  a3: { w: 420, h: 297, frameTop: 96, label: 68, labelGap: 23.5, stripGap: 26, text: 6.2 },
+  '600x350': { w: 600, h: 350, frameTop: 132, label: 96, labelGap: 29.5, stripGap: 30, text: 6.6 }
 };
 
 async function main() {
