@@ -36,7 +36,9 @@
     // Where the two positions lie in the camera's picture (x, y, width, height as fractions).
     // Set well apart, so a hand at one card stays clear of the other. The printed mat
     // (mat/build-mat.js) is drawn from these numbers.
-    layout: { R: [0.07, 0.22, 0.30, 0.56], U: [0.63, 0.22, 0.30, 0.56] },
+    // The positions are tall (72% of the picture), so the picture can be small: with poker-size
+    // cards it covers 279 x 157 mm of table, which fits on an A4 sheet.
+    layout: { R: [0.05, 0.14, 0.305, 0.72], U: [0.645, 0.14, 0.305, 0.72] },
     spots: [
       { id: 'R', label: '紅方', odds: '1 : 1', side: 'red' },
       { id: 'T', label: '平手', odds: '1 : 8', side: 'tie' },

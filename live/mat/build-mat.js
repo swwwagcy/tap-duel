@@ -3,7 +3,7 @@
 // positions sit exactly where the reader's default layout expects them (games.js: duel.layout),
 // so a camera lined up with the four corner marks needs no further adjusting.
 //
-//   node mat/build-mat.js            -> mat/duel-mat-600x350.{svg,pdf} and mat/duel-mat-a3.{svg,pdf}
+//   node mat/build-mat.js            -> mat/duel-mat-{a4,a3,600x350}.{svg,pdf,png}
 //   node mat/build-mat.js 龍 虎      -> the same with other words on the two sides (written to the
 //                                       folder given as the third argument, default mat/)
 'use strict';
@@ -12,7 +12,9 @@ const path = require('path');
 const Games = require('../public/games.js');
 
 const CARD = { w: 63, h: 88 };                       // a poker-size card, mm
-const FRAME = { w: 358.4, h: 201.6 };                // what the camera sees, mm (16:9); a card is 78% of its position's height
+// What the camera sees, mm (16:9), sized so that a card is 78% of its position's height.
+const FRAME_H = CARD.h / 0.78 / layoutHeight(), FRAME = { w: FRAME_H * 16 / 9, h: FRAME_H };
+function layoutHeight() { return Games.GAMES.duel.layout.R[3]; }
 const layout = Games.GAMES.duel.layout;
 const COLOUR = { mat: '#1f5e3a', faint: '#2a6c46', line: '#e9dfb6', red: '#e9584c', blue: '#4f8ff7', text: '#f3efdc', dim: '#b9c9bd' };
 const FONT = "'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', 'WenQuanYi Zen Hei', sans-serif";
@@ -27,7 +29,7 @@ function mat(size, words) {
   // The camera's picture: a bright corner mark at each corner, well away from the card positions.
   const corner = (x, y, dx, dy) => `<path d="M${x + dx * 14} ${y}H${x}V${y + dy * 14}" fill="none" stroke="${COLOUR.line}" stroke-width="1.6" stroke-linecap="round"/>`;
   add(corner(fx, fy, 1, 1) + corner(fx + FRAME.w, fy, -1, 1) + corner(fx, fy + FRAME.h, 1, -1) + corner(fx + FRAME.w, fy + FRAME.h, -1, -1));
-  add(`<text x="${W / 2}" y="${fy - 5}" text-anchor="middle" font-size="5" fill="${COLOUR.dim}">▲ 讀牌器畫面的上方　畫面四個角對準四個角標，手機橫放</text>`);
+  add(`<text x="${W / 2}" y="${fy - 4}" text-anchor="middle" font-size="${(size.text * 0.8).toFixed(1)}" fill="${COLOUR.dim}">▲ 讀牌器畫面的上方　畫面四個角對準四個角標，手機橫放</text>`);
   [['R', COLOUR.red, words[0]], ['U', COLOUR.blue, words[1]]].forEach(([id, colour, word]) => {
     const z = zone(id), cx = z.x + z.w / 2, cy = z.y + z.h / 2;
     // A coloured border outside the area the reader looks at (the position plus 8% all round),
@@ -38,26 +40,32 @@ function mat(size, words) {
     const hw = CARD.w / 2 + 1.5, hh = CARD.h / 2 + 1.5, t = 9;
     const tick = (sx, sy) => `<path d="M${cx + sx * hw} ${cy + sy * (hh - t)}V${cy + sy * hh}H${cx + sx * (hw - t)}" fill="none" stroke="${COLOUR.faint}" stroke-width="0.9"/>`;
     add(tick(-1, -1) + tick(1, -1) + tick(-1, 1) + tick(1, 1));
-    add(`<text x="${cx}" y="${(z.y - z.h * m - 6.5).toFixed(2)}" text-anchor="middle" font-size="14" font-weight="700" fill="${colour}">${word}</text>`);
   });
-  const gap = fx + FRAME.w / 2;
-  add(`<line x1="${gap}" y1="${fy + FRAME.h * 0.3}" x2="${gap}" y2="${fy + FRAME.h * 0.7}" stroke="${COLOUR.faint}" stroke-width="0.9"/>`);
+  // The two names, as large as the space between the positions allows, each with an arrow to its
+  // side. They lie outside the areas the reader looks at.
+  const middle = fx + FRAME.w / 2, between = (layout.U[0] - layout.R[0] - layout.R[2]) * FRAME.w - 2 * layout.R[2] * FRAME.w * 0.13 - 8;
+  [[words[0], COLOUR.red, 0.34, -1], [words[1], COLOUR.blue, 0.8, 1]].forEach(([word, colour, at, side]) => {
+    const size = Math.min(FRAME.h * 0.3, between / word.length), base = fy + FRAME.h * at, ay = base + size * 0.3;
+    add(`<text x="${middle}" y="${base.toFixed(2)}" text-anchor="middle" font-size="${size.toFixed(1)}" font-weight="700" fill="${colour}" stroke="${colour}" stroke-width="${(size * 0.028).toFixed(2)}" stroke-linejoin="round">${word}</text>`);
+    add(`<path d="M${middle + side * 16} ${ay}l${-side * 9} -5v10z" fill="${colour}"/><path d="M${middle - side * 10} ${ay}H${middle + side * 8}" stroke="${colour}" stroke-width="2.4"/>`);
+  });
   // The host's side: the three things to remember.
   const by = fy + FRAME.h + size.stripGap;
   const steps = ['① 牌正面朝上，放進框裡', '② 手離開，等主持台出現這張牌', '③ 確認後，把兩張牌都收走'];
-  steps.forEach((text, index) => add(`<text x="${(W * (index * 2 + 1) / 6).toFixed(1)}" y="${by}" text-anchor="middle" font-size="6.2" fill="${COLOUR.text}">${text}</text>`));
-  add(`<text x="${W / 2}" y="${by + 11}" text-anchor="middle" font-size="4.6" fill="${COLOUR.dim}">主持人坐這一側　｜　四個角標圍起來的範圍裡只放這一局的兩張牌，牌堆與用過的牌放在外面</text>`);
+  steps.forEach((text, index) => add(`<text x="${(W * (index * 2 + 1) / 6).toFixed(1)}" y="${by}" text-anchor="middle" font-size="${size.text}" fill="${COLOUR.text}">${text}</text>`));
+  add(`<text x="${W / 2}" y="${by + size.text * 1.7}" text-anchor="middle" font-size="${(size.text * 0.74).toFixed(1)}" fill="${COLOUR.dim}">主持人坐這一側　｜　四個角標圍起來的範圍裡只放這一局的兩張牌，牌堆與用過的牌放在外面</text>`);
   add('</svg>');
   return out.join('\n');
 }
 
 const SIZES = {
-  '600x350': { w: 600, h: 350, frameTop: 46, stripGap: 38 },
-  a3: { w: 420, h: 297, frameTop: 34, stripGap: 30 }
+  a4: { w: 297, h: 210, frameTop: 20, stripGap: 13, text: 4.6 },
+  a3: { w: 420, h: 297, frameTop: 52, stripGap: 30, text: 6.2 },
+  '600x350': { w: 600, h: 350, frameTop: 72, stripGap: 40, text: 6.6 }
 };
 
 async function main() {
-  const words = [process.argv[2] || '紅方', process.argv[3] || '藍方'];
+  const words = [process.argv[2] || '紅', process.argv[3] || '藍'];
   const outDir = path.resolve(process.argv[4] || __dirname);
   const suffix = process.argv[2] ? '-custom' : '';
   const { chromium } = require('playwright');

@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="297mm" height="210mm" viewBox="0 0 297 210" font-family="'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', 'WenQuanYi Zen Hei', sans-serif">
+<rect width="297" height="210" fill="#1f5e3a"/>
+<path d="M23.215416270971815 20H9.215416270971815V34" fill="none" stroke="#e9dfb6" stroke-width="1.6" stroke-linecap="round"/><path d="M273.7845837290282 20H287.7845837290282V34" fill="none" stroke="#e9dfb6" stroke-width="1.6" stroke-linecap="round"/><path d="M23.215416270971815 176.6951566951567H9.215416270971815V162.6951566951567" fill="none" stroke="#e9dfb6" stroke-width="1.6" stroke-linecap="round"/><path d="M273.7845837290282 176.6951566951567H287.7845837290282V162.6951566951567" fill="none" stroke="#e9dfb6" stroke-width="1.6" stroke-linecap="round"/>
+<text x="148.5" y="16" text-anchor="middle" font-size="3.7" fill="#b9c9bd">▲ 讀牌器畫面的上方　畫面四個角對準四個角標，手機橫放</text>
+<rect x="12.10" y="27.27" width="107.05" height="142.15" rx="6" fill="none" stroke="#e9584c" stroke-width="1.8"/>
+<path d="M32.625672681228224 61.84757834757835V52.84757834757835H41.625672681228224" fill="none" stroke="#2a6c46" stroke-width="0.9"/><path d="M98.62567268122822 61.84757834757835V52.84757834757835H89.62567268122822" fill="none" stroke="#2a6c46" stroke-width="0.9"/><path d="M32.625672681228224 134.84757834757835V143.84757834757835H41.625672681228224" fill="none" stroke="#2a6c46" stroke-width="0.9"/><path d="M98.62567268122822 134.84757834757835V143.84757834757835H89.62567268122822" fill="none" stroke="#2a6c46" stroke-width="0.9"/>
+<rect x="177.85" y="27.27" width="107.05" height="142.15" rx="6" fill="none" stroke="#4f8ff7" stroke-width="1.8"/>
+<path d="M198.37432731877178 61.84757834757835V52.84757834757835H207.37432731877178" fill="none" stroke="#2a6c46" stroke-width="0.9"/><path d="M264.37432731877175 61.84757834757835V52.84757834757835H255.37432731877178" fill="none" stroke="#2a6c46" stroke-width="0.9"/><path d="M198.37432731877178 134.84757834757835V143.84757834757835H207.37432731877178" fill="none" stroke="#2a6c46" stroke-width="0.9"/><path d="M264.37432731877175 134.84757834757835V143.84757834757835H255.37432731877178" fill="none" stroke="#2a6c46" stroke-width="0.9"/>
+<text x="148.5" y="73.28" text-anchor="middle" font-size="47.0" font-weight="700" fill="#e9584c" stroke="#e9584c" stroke-width="1.32" stroke-linejoin="round">紅</text>
+<path d="M132.5 87.3789173789174l9 -5v10z" fill="#e9584c"/><path d="M158.5 87.3789173789174H140.5" stroke="#e9584c" stroke-width="2.4"/>
+<text x="148.5" y="145.36" text-anchor="middle" font-size="47.0" font-weight="700" fill="#4f8ff7" stroke="#4f8ff7" stroke-width="1.32" stroke-linejoin="round">藍</text>
+<path d="M164.5 159.45868945868943l-9 -5v10z" fill="#4f8ff7"/><path d="M138.5 159.45868945868943H156.5" stroke="#4f8ff7" stroke-width="2.4"/>
+<text x="49.5" y="189.6951566951567" text-anchor="middle" font-size="4.6" fill="#f3efdc">① 牌正面朝上，放進框裡</text>
+<text x="148.5" y="189.6951566951567" text-anchor="middle" font-size="4.6" fill="#f3efdc">② 手離開，等主持台出現這張牌</text>
+<text x="247.5" y="189.6951566951567" text-anchor="middle" font-size="4.6" fill="#f3efdc">③ 確認後，把兩張牌都收走</text>
+<text x="148.5" y="197.5151566951567" text-anchor="middle" font-size="3.4" fill="#b9c9bd">主持人坐這一側　｜　四個角標圍起來的範圍裡只放這一局的兩張牌，牌堆與用過的牌放在外面</text>
+</svg>

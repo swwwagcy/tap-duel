@@ -128,7 +128,8 @@ const server = http.createServer((request, response) => {
   // still be read, and the position must still empty when the card is taken away.
   const cardH = 420, cardW = cardH * 0.716;
   const mats = [
-    ['a logo in the corner of the position', [{ kind: 'patch', x: red.x + 130, y: red.y - 290, w: 130, h: 70 }]],
+    // top right corner of the red position, wherever the layout puts it
+    ['a logo in the corner of the position', [{ kind: 'patch', x: (layout[0] + layout[2]) * 1920 - 158, y: layout[1] * 1080 + 12, w: 130, h: 70 }]],
     ['a printed outline where the card goes', [{ kind: 'outline', x: red.x + 8 - cardW * 0.56, y: red.y - 6 - cardH * 0.56, w: cardW * 1.12, h: cardH * 1.12, line: 7 }]]
   ];
   for (const [name, marks] of mats) {
