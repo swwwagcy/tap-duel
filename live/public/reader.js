@@ -8,7 +8,8 @@
   var STILL_FRAMES = 3;            // a card must rest this many frames before it is read
   var READ_FRAMES = 3;             // separate frames read for one answer
   var EMPTY_FRAMES = 3;            // frames without a card before a position counts as empty
-  var READ_ATTEMPTS = 3;           // an unsure answer is retried with fresh frames this many times
+  var READ_ATTEMPTS = 6;           // a still thing that cannot be read is read again with fresh frames this many times
+                                   // (about five seconds: time for the hand that placed the card to leave) before it is called unsure
   var MIN_CARD_PX = 240;           // recommended card height in the picture
   var HARD_MIN_CARD_PX = 150;      // below this a reading is never trusted
   var SEARCH_MARGIN = 0.08;        // the card is looked for a little beyond the drawn frame
@@ -498,7 +499,7 @@
     zs.result = reading; zs.wait = 0;
     if (verdict.back) { letGo(zs); zs.status = 'back'; zs.why = ''; zs.again = false; report(zoneId, { state: 'back' }); return; }
     zs.attempts = (zs.attempts || 0) + 1;
-    if (!verdict.sure && zs.attempts < READ_ATTEMPTS) { zs.status = 'busy'; zs.still = 0; return; }   // read again with fresh frames
+    if (!verdict.sure && zs.attempts < READ_ATTEMPTS) { zs.status = 'busy'; zs.still = 0; zs.why = '還讀不清楚，再看一次（手請離開牌）'; return; }   // read again with fresh frames
     zs.status = verdict.sure ? 'card' : 'unsure';
     if (verdict.sure) hold(zs, state.frame, zs.found); else letGo(zs);
     if (!verdict.sure) zs.why = reading && reading.problem ? (PROBLEMS[reading.problem] || reading.problem) : reading ? '把握不夠' : '讀不到牌';

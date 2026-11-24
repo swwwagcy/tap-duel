@@ -124,6 +124,21 @@ const server = http.createServer((request, response) => {
     await lens({ hand: { x: red.x, y: red.y, rx: 220, ry: 260 } }); await wait(600); await place([]); await wait(500); await lens({ hand: null });
   }, now => now === 'empty', 8000);
 
+  // Dealt after the round has closed: the hand that puts the card down stays on it for a while.
+  // The position waits for the hand to leave; it does not call the card unreadable meanwhile.
+  await until(async () => (await status()) === 'empty', 'empty before the late card');
+  await resetSeen();
+  await lens({ hand: { x: red.x + 20, y: red.y + 120, rx: 200, ry: 170 } });
+  await place([{ card: 'S9' }]);
+  await wait(3500);
+  await lens({ hand: null });
+  await change('placed with the hand resting on it for 3.5 s: read once the hand leaves', async () => {}, now => now === 'card:S9', 8000);
+  { const states = await seen(), gaveUp = states.some(state => state === 'unsure');
+    console.log((gaveUp ? 'BAD ' : 'ok  ') + 'never called unreadable while the hand was there' + (gaveUp ? ': ' + states.join(' → ') : ''));
+    if (gaveUp) failed = true; }
+  await place([]);
+  await until(async () => (await status()) === 'empty', 'cleared after the late card');
+
   // A mat is rarely plain: with a logo or a printed card outline inside the position, a card must
   // still be read, and the position must still empty when the card is taken away.
   const cardH = 420, cardW = cardH * 0.716;
