@@ -42,31 +42,18 @@ function mat(size, words) {
   });
   const gap = fx + FRAME.w / 2;
   add(`<line x1="${gap}" y1="${fy + FRAME.h * 0.3}" x2="${gap}" y2="${fy + FRAME.h * 0.7}" stroke="${COLOUR.faint}" stroke-width="0.9"/>`);
-  // Outside the camera's picture: where the deck and the used cards go, so they are never read.
-  if (size.spots) {
-    const spot = (x, label, note) => {
-      const y = fy + (FRAME.h - CARD.h) / 2;
-      return `<rect x="${x}" y="${y}" width="${CARD.w}" height="${CARD.h}" rx="4" fill="none" stroke="${COLOUR.dim}" stroke-width="0.9" stroke-dasharray="3 2.5"/>` +
-        `<text x="${x + CARD.w / 2}" y="${y + CARD.h / 2 + 3}" text-anchor="middle" font-size="9" font-weight="700" fill="${COLOUR.text}">${label}</text>` +
-        `<text x="${x + CARD.w / 2}" y="${y + CARD.h + 8}" text-anchor="middle" font-size="4.6" fill="${COLOUR.dim}">${note}</text>`;
-    };
-    add(spot((fx - CARD.w) / 2, '牌堆', '還沒發的牌'));
-    add(spot(fx + FRAME.w + (fx - CARD.w) / 2, '收牌', '用過的牌放這裡'));
-  }
   // The host's side: the three things to remember.
   const by = fy + FRAME.h + size.stripGap;
-  const steps = size.spots
-    ? ['① 牌正面朝上，放進框裡', '② 手離開，等主持台出現這張牌', '③ 確認後，兩張牌都收到「收牌」']
-    : ['① 牌正面朝上，放進框裡', '② 手離開，等主持台出現這張牌', '③ 確認後，把牌收到墊子外面'];
+  const steps = ['① 牌正面朝上，放進框裡', '② 手離開，等主持台出現這張牌', '③ 確認後，把兩張牌都收走'];
   steps.forEach((text, index) => add(`<text x="${(W * (index * 2 + 1) / 6).toFixed(1)}" y="${by}" text-anchor="middle" font-size="6.2" fill="${COLOUR.text}">${text}</text>`));
-  add(`<text x="${W / 2}" y="${by + 11}" text-anchor="middle" font-size="4.6" fill="${COLOUR.dim}">主持人坐這一側　｜　框裡只放這一局的牌，其他東西不要放進四個角標圍起來的範圍</text>`);
+  add(`<text x="${W / 2}" y="${by + 11}" text-anchor="middle" font-size="4.6" fill="${COLOUR.dim}">主持人坐這一側　｜　四個角標圍起來的範圍裡只放這一局的兩張牌，牌堆與用過的牌放在外面</text>`);
   add('</svg>');
   return out.join('\n');
 }
 
 const SIZES = {
-  '600x350': { w: 600, h: 350, frameTop: 46, stripGap: 38, spots: true },
-  a3: { w: 420, h: 297, frameTop: 34, stripGap: 30, spots: false }
+  '600x350': { w: 600, h: 350, frameTop: 46, stripGap: 38 },
+  a3: { w: 420, h: 297, frameTop: 34, stripGap: 30 }
 };
 
 async function main() {

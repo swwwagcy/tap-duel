@@ -12,6 +12,9 @@ const { chromium } = require('playwright');
 
 const PORT = 18000 + Math.floor(Math.random() * 1000);
 const BASE = 'http://127.0.0.1:' + PORT;
+// Where the two positions are in a 1920 x 1080 camera picture, from the game's own layout.
+const DUEL = require('../public/games.js').GAMES.duel.layout;
+const centre = id => ({ x: (DUEL[id][0] + DUEL[id][2] / 2) * 1920, y: (DUEL[id][1] + DUEL[id][3] / 2) * 1080 });
 const KEY = 'test-key-for-staff', READER_KEY = 'test-key-for-reader';
 let server, browser;
 
@@ -185,7 +188,7 @@ const card = (socket, table, zone, value) => socket.send(JSON.stringify({ t: 'zo
   await until(() => viewer.evaluate(() => !document.querySelector('.spot[data-spot="U"]').disabled), 'round 4 open');
   await viewer.click('.chip[data-chip="100"]'); await viewer.click('.spot[data-spot="U"]');
   // The cards go down face-down first during the countdown; the reader must report them as backs.
-  await readerPage.evaluate(([r, b]) => window.__fake.place([{ back: true, h: 420, x: r.x, y: r.y, angle: 0.03 }, { back: true, h: 420, x: b.x, y: b.y, angle: -0.04 }]), [{ x: (0.14 + 0.15) * 1920, y: 0.5 * 1080 }, { x: (0.56 + 0.15) * 1920, y: 0.5 * 1080 }]);
+  await readerPage.evaluate(([r, b]) => window.__fake.place([{ back: true, h: 420, x: r.x, y: r.y, angle: 0.03 }, { back: true, h: 420, x: b.x, y: b.y, angle: -0.04 }]), [centre('R'), centre('U')]);
   await until(() => host.evaluate(() => document.querySelectorAll('.zone.back').length === 2), 'reader page reports both face-down cards', 15000);
   // Zoom: the buttons change the picture the reader works on.
   const zoomBefore = await readerPage.textContent('#zoomText');
@@ -194,7 +197,7 @@ const card = (socket, table, zone, value) => socket.send(JSON.stringify({ t: 'zo
   await readerPage.click('#zoomOut'); await readerPage.click('#zoomOut');
   assert.strictEqual(await readerPage.textContent('#zoomText'), zoomBefore, 'zoom returns');
   await until(() => host.evaluate(() => document.getElementById('phaseBox').dataset.phase === 'dealing'), 'round 4 dealing', 12000);
-  const red = { x: (0.14 + 0.15) * 1920, y: (0.22 + 0.28) * 1080 }, blue = { x: (0.56 + 0.15) * 1920, y: (0.22 + 0.28) * 1080 };
+  const red = centre('R'), blue = centre('U');
   await readerPage.evaluate(([r, b]) => window.__fake.place([{ card: 'S9', h: 420, x: r.x + 12, y: r.y - 8, angle: 0.06 }, { card: 'H3', h: 420, x: b.x - 10, y: b.y + 6, angle: -0.05, flip: true }]), [red, blue]);
   // Each zone must end either read by the camera as the true card, or flagged for the host. A
   // confident wrong card is the one outcome that is never acceptable.

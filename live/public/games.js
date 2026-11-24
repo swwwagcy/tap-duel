@@ -33,7 +33,10 @@
       { id: 'U', label: '藍方', side: 'blue' }
     ],
     // Where each card position sits on the camera image by default (fractions of the frame).
-    layout: { R: [0.14, 0.22, 0.30, 0.56], U: [0.56, 0.22, 0.30, 0.56] },
+    // Where the two positions lie in the camera's picture (x, y, width, height as fractions).
+    // Set well apart, so a hand at one card stays clear of the other. The printed mat
+    // (mat/build-mat.js) is drawn from these numbers.
+    layout: { R: [0.07, 0.22, 0.30, 0.56], U: [0.63, 0.22, 0.30, 0.56] },
     spots: [
       { id: 'R', label: '紅方', odds: '1 : 1', side: 'red' },
       { id: 'T', label: '平手', odds: '1 : 8', side: 'tie' },

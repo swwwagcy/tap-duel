@@ -62,7 +62,8 @@ const server = http.createServer((request, response) => {
   await page.click('#startCamera');
   await until(() => page.evaluate(() => !!window.__readerState.frame), 'frames flowing');
 
-  const red = { x: (0.14 + 0.15) * 1920, y: 0.5 * 1080 };
+  const layout = require('../public/games.js').GAMES.duel.layout.R;
+  const red = { x: (layout[0] + layout[2] / 2) * 1920, y: (layout[1] + layout[3] / 2) * 1080 };
   const place = cards => page.evaluate(([cards, red]) => window.__table.place(cards.map(card => Object.assign({ h: 420, x: red.x + 8, y: red.y - 6, angle: 0.04 }, card))), [cards, red]);
   const status = () => page.evaluate(() => { const zone = window.__readerState.zoneState.R; return zone.status + (zone.status === 'card' && zone.result ? ':' + zone.result.card : ''); });
   const lens = change => page.evaluate(change => Object.assign(window.__lens, change), change);
