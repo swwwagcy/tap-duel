@@ -128,7 +128,7 @@
     $('readerState').classList.toggle('offline', !table.readerOnline);
     renderButtons();
     renderHistory();
-    if (!$('drawer').hidden) fillSettings();
+    if (!$('drawer').hidden) { fillSettings(); refreshLog(); }
     if (state.pickerZone) renderPicker();
     tick();
   }
@@ -372,6 +372,13 @@
   });
 
   /* ---------------- test log ---------------- */
+  // With the settings open, the log follows the table: asked for again when a round ends.
+  function refreshLog() {
+    var table = state.table, mark = table ? table.roundNo + '/' + table.phase : '';
+    if (mark === state.logMark) return;
+    state.logMark = mark;
+    if (table && (table.phase === 'result' || table.phase === 'void')) link.send({ t: 'log', table: state.tableId });
+  }
   // What the camera did over the finished rounds. The card the host confirmed counts as right.
   function logTotals(rounds) {
     var totals = { rounds: 0, voided: 0, cards: 0, camera: 0, corrected: 0, unread: 0 };
@@ -394,7 +401,43 @@
     $('logSummary').textContent = !totals.rounds && !totals.voided ? '還沒有結束的回合。' :
       '已確認 ' + totals.rounds + ' 回合、取消 ' + totals.voided + ' 回合，共 ' + totals.cards + ' 張牌：鏡頭讀到並採用 ' + totals.camera + ' 張' + (totals.cards ? '（' + Math.round(totals.camera / totals.cards * 100) + '%）' : '') +
       '，鏡頭讀錯、主持人改掉 ' + totals.corrected + ' 張，鏡頭沒讀到、主持人選的 ' + totals.unread + ' 張。';
+    renderLogTable();
   }
+  // The rounds themselves, newest first: one line per position with what the camera read, what
+  // was used, and who decided. Cards that gave trouble are listed above the table.
+  function renderLogTable() {
+    var rounds = state.log || [], current = game();
+    function read(event) { return !event ? '—' : event.what === 'card' ? Games.cardLabel(event.card) + ' ' + Math.round(event.score * 100) + '%' : '認不出來'; }
+    var trouble = {};
+    var body = rounds.slice().reverse().map(function (round) {
+      var zones = Object.keys(round.zones), time = new Date(round.endedAt).toLocaleTimeString('zh-TW', { hour12: false });
+      var took = round.dealingAt ? ((round.endedAt - round.dealingAt) / 1000).toFixed(0) + ' 秒' : '';
+      if (!zones.length) return '<tr class="first"><td>' + Live.escape(round.roundNo) + '</td><td colspan="4" class="void">' + (round.ended === 'void' ? '已取消，沒有牌' : '沒有牌') + '</td><td class="num">' + took + '</td><td>' + time + '</td></tr>';
+      return zones.map(function (zone, index) {
+        var entry = round.zones[zone], verdict = '', kind = '';
+        if (!entry.final) { verdict = round.ended === 'void' ? '已取消' : '沒有採用'; kind = 'void'; }
+        else if (entry.finalBy === 'camera') { verdict = '鏡頭讀對'; kind = 'ok'; }
+        else if (entry.corrected) { verdict = '讀錯，主持人改掉'; kind = 'fixed'; }
+        else if (entry.unread) { verdict = '沒讀到，主持人選'; kind = 'picked'; }
+        else { verdict = '主持人選'; kind = 'picked'; }
+        if (entry.final && round.ended === 'confirmed' && (entry.corrected || entry.unread)) {
+          var item = trouble[entry.final] = trouble[entry.final] || { fixed: 0, picked: 0, as: {} };
+          if (entry.corrected) { item.fixed++; if (entry.cameraFirst && entry.cameraFirst.card) item.as[entry.cameraFirst.card] = true; } else item.picked++;
+        }
+        return '<tr' + (index ? '' : ' class="first"') + '><td>' + (index ? '' : Live.escape(round.roundNo)) + '</td><td>' + Live.escape(Games.zoneLabel(current, zone)) + '</td><td>' + Live.escape(read(entry.cameraLast || entry.cameraFirst)) + '</td><td>' + (entry.final ? Games.cardLabel(entry.final) : '—') + '</td><td class="' + kind + '">' + verdict + '</td><td class="num">' + (index ? '' : took) + '</td><td>' + (index ? '' : time) + '</td></tr>';
+      }).join('');
+    }).join('');
+    $('logTable').innerHTML = body ? '<table><thead><tr><th>回合</th><th>牌位</th><th>鏡頭讀到</th><th>採用</th><th>結果</th><th>出牌到結束</th><th>時間</th></tr></thead><tbody>' + body + '</tbody></table>' : '';
+    var cards = Object.keys(trouble);
+    $('logTrouble').hidden = !cards.length;
+    $('logTrouble').textContent = cards.length ? '讀不好的牌：' + cards.map(function (card) {
+      var item = trouble[card], parts = [];
+      if (item.picked) parts.push('沒讀到 ' + item.picked + ' 次');
+      if (item.fixed) parts.push('讀錯 ' + item.fixed + ' 次' + (Object.keys(item.as).length ? '，讀成 ' + Object.keys(item.as).map(Games.cardLabel).join('、') : ''));
+      return Games.cardLabel(card) + '（' + parts.join('；') + '）';
+    }).join('、') : '';
+  }
+
   function seconds(from, to) { return from && to ? ((to - from) / 1000).toFixed(1) : ''; }
   function csvCell(value) { var text = value == null ? '' : String(value); return /[",\n]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text; }
   function logCsv(rounds) {

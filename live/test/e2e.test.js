@@ -262,6 +262,9 @@ const card = (socket, table, zone, value) => socket.send(JSON.stringify({ t: 'zo
     await host.click('#openDrawer');
     await until(() => host.evaluate(() => /已確認 \d+ 回合/.test(document.getElementById('logSummary').textContent)), 'log summary shown');
     const summary = await host.evaluate(() => document.getElementById('logSummary').textContent);
+    const shown = await host.evaluate(() => ({ rows: document.querySelectorAll('#logTable tbody tr').length, text: document.getElementById('logTable').textContent }));
+    assert.ok(shown.rows >= 4 && shown.text.includes('鏡頭讀對') && shown.text.includes('紅方'), 'the rounds are listed in the console: ' + shown.rows + ' rows');
+    assert.ok(!shown.text.includes('[object'), 'every cell of the log shows a value');
     const csv = await host.evaluate(async () => {
       const rounds = await new Promise(resolve => { const socket = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws'); socket.onopen = () => socket.send(JSON.stringify({ t: 'hello', role: 'host', key: JSON.parse(localStorage.getItem('tdl-staff-key')) })); socket.onmessage = event => { const message = JSON.parse(event.data); if (message.t === 'welcome') socket.send(JSON.stringify({ t: 'log', table: 'duel' })); if (message.t === 'log') { socket.close(); resolve(message.rounds); } }; });
       return { rows: window.__hostLog.csv(rounds).split('\r\n'), totals: window.__hostLog.totals(rounds) };

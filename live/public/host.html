@@ -98,6 +98,15 @@
   .field:first-of-type { border-top: 0; }
   .field input[type="number"] { width: 90px; text-align: center; }
   .field input[type="checkbox"] { width: 26px; height: 26px; }
+  @media (min-width: 720px) { .drawer .panel.wide { grid-column: span 2; } }
+  .logwrap { overflow: auto; max-height: 46vh; margin: 10px 0; border: 1px solid var(--line); border-radius: 8px; }
+  .logwrap:empty { display: none; }
+  .logwrap table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  .logwrap th, .logwrap td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  .logwrap th { position: sticky; top: 0; background: var(--surface-2); color: var(--muted); font-weight: 500; }
+  .logwrap tr.first td { border-top: 2px solid var(--line); }
+  .logwrap td.num { font-family: var(--font-num); }
+  .logwrap .ok { color: var(--go); } .logwrap .fixed { color: var(--red); font-weight: 700; } .logwrap .picked { color: var(--wait); font-weight: 700; } .logwrap .void { color: var(--muted); }
   .qr { width: min(220px, 60%); background: #fff; border-radius: 10px; padding: 6px; }
   .qr svg { display: block; width: 100%; height: auto; }
   .hist { border-top: 1px solid var(--line); padding: 8px 0; font-size: 14px; }
@@ -168,11 +177,13 @@
       <p class="muted" style="font-size:14px">等待秒數要大於直播的延遲，主持人在等待結束、畫面變綠之後才翻牌。改動從下一回合生效。</p>
       <p class="muted" style="font-size:14px">快捷鍵：Enter、PageDown 或右方向鍵＝主按鈕（藍牙簡報器可用）。</p>
     </div>
-    <div class="panel">
+    <div class="panel wide">
       <h3 style="margin-top:0">測試紀錄</h3>
       <p id="logSummary" class="muted" style="font-size:14px;margin:0 0 8px">還沒有結束的回合。</p>
+      <p id="logTrouble" style="font-size:14px;margin:0 0 8px" hidden></p>
       <button id="logDownload" type="button">下載測試紀錄（CSV）</button>
-      <p class="muted" style="font-size:13px">每一回合每個牌位一列：鏡頭讀到什麼、把握度、主持人有沒有改、最後採用哪張、各階段幾秒。紀錄只在伺服器的記憶體裡，重新部署就會消失，測試結束請先下載。它把主持人確認的牌當成正確答案，主持人沒發現的讀錯這裡看不出來。</p>
+      <div class="logwrap" id="logTable"></div>
+      <p class="muted" style="font-size:13px">上表最新的回合在最上面，設定開著時會自動更新。下載的 CSV 另有各階段的秒數。紀錄只在伺服器的記憶體裡，重新部署就會消失，測試結束請先下載。它把主持人確認的牌當成正確答案，主持人沒發現的讀錯這裡看不出來。</p>
       <h3>讓觀眾掃碼加入</h3>
       <div class="qr" id="viewerQr"></div>
       <p class="muted" id="viewerUrl" style="font-size:13px;overflow-wrap:anywhere;user-select:text;-webkit-user-select:text"></p>
