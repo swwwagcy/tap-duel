@@ -170,6 +170,33 @@ check('staff are told what confirming would settle; viewers are not', () => with
   assert.ok(!('preview' in last(viewer)), 'viewers get no preview');
 }));
 
+check('the test log records what the camera read and where the host stepped in', () => withEngine((engine, open) => {
+  const host = open(); host.say({ t: 'hello', role: 'host', key: 'k' }); host.say({ t: 'watch', table: 'nine' });
+  const reader = open(); reader.say({ t: 'hello', role: 'reader', key: 'k' });
+  host.say({ t: 'open', table: 'nine' });
+  engine.tables.nine.phase = 'dealing';
+  const see = (zone, state, card) => reader.say({ t: 'zone', table: 'nine', zone, state, card, score: 0.9, margin: 0.5, top: [{ card: card || 'S5', score: 0.7 }] });
+  see('U1', 'card', 'S8');                       // read and kept
+  see('R1', 'card', 'H2');                       // read wrongly, the host corrects it
+  host.say({ t: 'setCard', table: 'nine', zone: 'R1', card: 'H3' });
+  see('U2', 'unsure');                           // not read, the host picks
+  host.say({ t: 'setCard', table: 'nine', zone: 'U2', card: 'DK' });
+  see('R2', 'card', 'C3');
+  host.say({ t: 'confirm', table: 'nine' });
+  host.say({ t: 'log', table: 'nine' });
+  const rounds = host.got.filter((message) => message.t === 'log').pop().rounds;
+  assert.strictEqual(rounds.length, 1);
+  const zones = rounds[0].zones;
+  assert.deepStrictEqual([zones.U1.finalBy, zones.U1.corrected, zones.U1.unread], ['camera', false, false]);
+  assert.deepStrictEqual([zones.R1.final, zones.R1.finalBy, zones.R1.corrected, zones.R1.cameraFirst.card], ['H3', 'host', true, 'H2']);
+  assert.deepStrictEqual([zones.U2.final, zones.U2.finalBy, zones.U2.corrected, zones.U2.unread], ['DK', 'host', false, true]);
+  assert.strictEqual(rounds[0].ended, 'confirmed');
+  const viewer = open(); viewer.say({ t: 'hello', role: 'viewer' }); viewer.say({ t: 'log', table: 'nine' });
+  assert.strictEqual(viewer.got.filter((message) => message.t === 'log').length, 0, 'viewers cannot fetch the log');
+  reader.say({ t: 'log', table: 'nine' });
+  assert.strictEqual(reader.got.filter((message) => message.t === 'log').length, 0, 'nor can the reader');
+}));
+
 // With a stream delay, viewers must not be ahead of the video: no card faces while dealing, and
 // the result only once the delay has passed. Points are settled at once on the server all the same.
 const delayed = (async () => {

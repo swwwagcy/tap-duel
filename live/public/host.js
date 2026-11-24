@@ -39,6 +39,8 @@
     } else if (message.t === 'frame') {
       if (message.table !== state.tableId) return;
       $('live').src = message.image; $('live').hidden = false;
+    } else if (message.t === 'log') {
+      if (message.table === state.tableId) { state.log = message.rounds || []; renderLog(); if (state.wantDownload) { state.wantDownload = false; downloadLog(); } }
     } else if (message.t === 'notice') {
       if (message.table === state.tableId) note(message.text, message.level);
     } else if (message.t === 'error') {
@@ -362,7 +364,68 @@
   }
   function sendSettings() { link.send({ t: 'settings', table: state.tableId, openSeconds: $('setOpen').value, waitSeconds: $('setWait').value, streamDelay: $('setStream').value, auto: $('setAuto').checked }); }
   ['setOpen', 'setWait', 'setStream', 'setAuto'].forEach(function (id) { $(id).addEventListener('change', sendSettings); });
-  $('openDrawer').addEventListener('click', function () { $('drawer').hidden = false; fillSettings(); renderHistory(); });
+  $('openDrawer').addEventListener('click', function () {
+    $('drawer').hidden = false; fillSettings(); renderHistory();
+    link.send({ t: 'log', table: state.tableId });
+    var address = Live.pageUrl('play.html');
+    $('viewerQr').innerHTML = Live.qrSvg(address); $('viewerUrl').textContent = address;
+  });
+
+  /* ---------------- test log ---------------- */
+  // What the camera did over the finished rounds. The card the host confirmed counts as right.
+  function logTotals(rounds) {
+    var totals = { rounds: 0, voided: 0, cards: 0, camera: 0, corrected: 0, unread: 0 };
+    rounds.forEach(function (round) {
+      if (round.ended !== 'confirmed') { totals.voided++; return; }
+      totals.rounds++;
+      Object.keys(round.zones).forEach(function (zone) {
+        var entry = round.zones[zone];
+        if (!entry.final) return;
+        totals.cards++;
+        if (entry.finalBy === 'camera') totals.camera++;
+        else if (entry.corrected) totals.corrected++;
+        else totals.unread++;
+      });
+    });
+    return totals;
+  }
+  function renderLog() {
+    var totals = logTotals(state.log || []);
+    $('logSummary').textContent = !totals.rounds && !totals.voided ? '還沒有結束的回合。' :
+      '已確認 ' + totals.rounds + ' 回合、取消 ' + totals.voided + ' 回合，共 ' + totals.cards + ' 張牌：鏡頭讀到並採用 ' + totals.camera + ' 張' + (totals.cards ? '（' + Math.round(totals.camera / totals.cards * 100) + '%）' : '') +
+      '，鏡頭讀錯、主持人改掉 ' + totals.corrected + ' 張，鏡頭沒讀到、主持人選的 ' + totals.unread + ' 張。';
+  }
+  function seconds(from, to) { return from && to ? ((to - from) / 1000).toFixed(1) : ''; }
+  function csvCell(value) { var text = value == null ? '' : String(value); return /[",\n]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text; }
+  function logCsv(rounds) {
+    var current = game();
+    var rows = [['回合', '遊戲', '結束方式', '結果', '開始時間', '選擇秒數', '截止到出牌秒數', '出牌到結束秒數', '參與人數', '投入', '取回', '牌位', '鏡頭第一次讀到', '第一次把握度', '第一次差距', '鏡頭最後讀到', '最後把握度', '最後採用', '採用來源', '鏡頭讀錯主持人改掉', '鏡頭沒讀到主持人選', '這個牌位的事件數']];
+    function read(event) { return !event ? '' : event.what === 'card' ? Games.cardLabel(event.card) : '認不出來' + (event.card ? '（最像 ' + Games.cardLabel(event.card) + '）' : ''); }
+    rounds.forEach(function (round) {
+      var head = [round.roundNo, current.name, round.ended === 'confirmed' ? '確認' : '取消', round.result, new Date(round.openedAt).toISOString(), seconds(round.openedAt, round.closedAt), seconds(round.closedAt, round.dealingAt), seconds(round.dealingAt, round.endedAt), round.pickers, round.staked, round.returned];
+      var zones = Object.keys(round.zones);
+      if (!zones.length) { rows.push(head); return; }
+      zones.forEach(function (zone) {
+        var entry = round.zones[zone], first = entry.cameraFirst, last = entry.cameraLast;
+        rows.push(head.concat([Games.zoneLabel(current, zone), read(first), first ? first.score : '', first ? first.margin : '', read(last), last ? last.score : '', entry.final ? Games.cardLabel(entry.final) : '', entry.finalBy === 'camera' ? '鏡頭' : entry.finalBy === 'host' ? '主持人' : '', entry.corrected ? '是' : '', entry.unread ? '是' : '', entry.events]));
+      });
+    });
+    return rows.map(function (row) { return row.map(csvCell).join(','); }).join('\r\n');
+  }
+  function downloadLog() {
+    var rounds = state.log || [];
+    if (!rounds.length) { Live.toast('還沒有結束的回合可以下載。'); return; }
+    // The byte-order mark makes spreadsheet programs read the Chinese headings correctly.
+    var blob = new Blob(['\ufeff' + logCsv(rounds)], { type: 'text/csv;charset=utf-8' });
+    var anchor = document.createElement('a');
+    anchor.href = URL.createObjectURL(blob);
+    anchor.download = 'tap-duel-' + state.tableId + '-' + new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '') + '.csv';
+    document.body.appendChild(anchor); anchor.click(); anchor.remove();
+    setTimeout(function () { URL.revokeObjectURL(anchor.href); }, 5000);
+  }
+  // Always fetch the latest before downloading: a round may have ended since the drawer was opened.
+  $('logDownload').addEventListener('click', function () { state.wantDownload = true; link.send({ t: 'log', table: state.tableId }); });
+  window.__hostLog = { csv: logCsv, totals: logTotals };   // read by the automated test
   $('closeDrawer').addEventListener('click', function () { $('drawer').hidden = true; });
 
   function note(text, level) {

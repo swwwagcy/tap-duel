@@ -29,6 +29,7 @@
     const READER_TIMEOUT_MS = 5000;
     const FRAME_INTERVAL_MS = 400;
     const HISTORY_LIMIT = 30;
+    const LOG_LIMIT = 1000;            // rounds kept for the test log (in memory, gone on restart)
     const ROAD_LIMIT = 60;
 
     /* ------------------------------------------------------------------ state */
@@ -46,6 +47,7 @@
         // result that much later, so their page never gets ahead of the video.
         settings: Object.assign({ openSeconds: 15, waitSeconds: 3, auto: false, streamDelay: 0 }, options.tableSettings || {}),
         revealAt: 0,
+        log: [],                // one record per finished round, for the test log
         history: [],
         road: [],
         frame: null,
@@ -73,6 +75,7 @@
         no: table.id.toUpperCase() + '-' + day + '-' + String(table.sequence).padStart(3, '0'),
         picks: new Map(),       // viewerId -> [{ spot, amount }] in the order they were made
         cards: {},              // zone -> { card, source, score, margin, top, shot, uncertain, at }
+        trail: [],              // everything that happened to a position, in order: what the camera said, what the host set
         warned: {},
         outcome: null,
         openedAt: Date.now()
@@ -237,6 +240,7 @@
       table.road.push(table.game.road(outcome));
       if (table.road.length > ROAD_LIMIT) table.road.shift();
       pushHistory(table, { roundNo: round.no, text: outcome.text, road: table.game.road(outcome), staked: staked, returned: returned });
+      logRound(table, 'confirmed', outcome.text, staked, returned);
       table.phase = 'result';
       table.endsAt = Date.now() + delay + RESULT_HOLD_MS;
       broadcastTable(table);
@@ -257,11 +261,44 @@
       });
       round.outcome = { winner: null, text: '已取消' };
       pushHistory(table, { roundNo: round.no, text: '已取消（退回 ' + staked + ' 點）', road: null, staked: staked, returned: staked });
+      logRound(table, 'void', '已取消', staked, staked);
       table.phase = 'void';
       table.endsAt = Date.now() + RESULT_HOLD_MS;
       broadcastTable(table);
       round.picks.forEach(function (list, viewerId) { sendMe(viewerId); });
       return null;
+    }
+
+    function mark(round, zone, by, what, card, score, margin) {
+      if (!round.trail) round.trail = [];
+      if (round.trail.length < 400) round.trail.push({ at: Date.now(), zone: zone, by: by, what: what, card: card || null, score: score || 0, margin: margin || 0 });
+    }
+
+    // One record of a finished round for the test log: for every position, what the camera first
+    // and last said, what was used in the end, and whether the host had to step in. The card the
+    // host confirmed is taken as the truth; a misread the host did not notice cannot show here.
+    function logRound(table, ended, resultText, staked, returned) {
+      const round = table.round, zones = {};
+      table.game.zones.forEach(function (zone) {
+        const events = (round.trail || []).filter(function (event) { return event.zone === zone.id; });
+        const camera = events.filter(function (event) { return event.by === 'camera' && (event.what === 'card' || event.what === 'unsure'); });
+        const entry = round.cards[zone.id];
+        if (!events.length && !entry) return;
+        const final = entry && entry.card ? entry.card : null, lastRead = camera.length ? camera[camera.length - 1] : null;
+        zones[zone.id] = {
+          cameraFirst: camera.length ? camera[0] : null,
+          cameraLast: lastRead,
+          final: final,
+          finalBy: final ? (entry.source === 'manual' ? 'host' : 'camera') : null,
+          // the camera was sure of a card, and the host replaced it with another
+          corrected: !!(final && entry.source === 'manual' && camera.some(function (event) { return event.what === 'card' && event.card !== final; })),
+          // the camera gave no sure card, the host picked one
+          unread: !!(final && entry.source === 'manual' && !camera.some(function (event) { return event.what === 'card'; })),
+          events: events.length
+        };
+      });
+      table.log.push({ roundNo: round.no, table: table.id, ended: ended, result: resultText, openedAt: round.openedAt, closedAt: round.closedAt || null, dealingAt: round.dealingAt || null, endedAt: Date.now(), pickers: round.picks.size, staked: staked, returned: returned, zones: zones });
+      if (table.log.length > LOG_LIMIT) table.log.shift();
     }
 
     function pushHistory(table, entry) {
@@ -282,10 +319,12 @@
         const table = tables[id];
         if (table.phase === 'open' && now >= table.endsAt) {
           table.phase = 'closed';
+          if (table.round) table.round.closedAt = now;
           table.endsAt = now + table.settings.waitSeconds * 1000;
           broadcastTable(table);
         } else if (table.phase === 'closed' && now >= table.endsAt) {
           table.phase = 'dealing';
+          if (table.round) table.round.dealingAt = now;
           table.endsAt = 0;
           broadcastTable(table);
         } else if ((table.phase === 'result' || table.phase === 'void') && table.settings.auto && now >= table.endsAt && !staleZones(table).length) {
@@ -355,6 +394,7 @@
     function handleHost(socket, message) {
       const table = tableOf(message.table);
       if (!table) return 'Unknown table.';
+      if (message.t === 'log') { send(socket, { t: 'log', table: table.id, rounds: table.log }); return null; }
       if (message.t === 'open') { const refused = openRound(table, !!message.force); if (!refused) audit({ action: 'open', table: table.id, round: table.round.no, forced: !!message.force, by: socket.address }); return refused; }
       if (message.t === 'void') { const roundNo = table.round && table.round.no, refused = voidRound(table); if (!refused) audit({ action: 'void', table: table.id, round: roundNo, by: socket.address }); return refused; }
       if (message.t === 'confirm') {
@@ -366,8 +406,8 @@
       if (message.t === 'setCard') {
         if (table.phase !== 'dealing') return '出牌階段才能修改牌。';
         if (!table.game.zones.some(function (zone) { return zone.id === message.zone; })) return 'Unknown zone.';
-        if (message.card === null) delete table.round.cards[message.zone];
-        else if (Games.isCard(message.card)) table.round.cards[message.zone] = { card: message.card, source: 'manual', at: Date.now() };
+        if (message.card === null) { delete table.round.cards[message.zone]; mark(table.round, message.zone, 'host', 'cleared'); }
+        else if (Games.isCard(message.card)) { table.round.cards[message.zone] = { card: message.card, source: 'manual', at: Date.now() }; mark(table.round, message.zone, 'host', 'card', message.card); }
         else return 'Unknown card.';
         audit({ action: 'setCard', table: table.id, round: table.round.no, zone: message.zone, card: message.card, by: socket.address });
         markConflicts(table.round);
@@ -443,7 +483,7 @@
       }
       if (table.phase !== 'dealing') return null;
       if (message.state === 'empty') {
-        if (existing && existing.source === 'optical') { delete round.cards[zone]; markConflicts(round); broadcastTable(table); }
+        if (existing && existing.source === 'optical') { delete round.cards[zone]; mark(round, zone, 'camera', 'empty'); markConflicts(round); broadcastTable(table); }
         return null;
       }
       if (existing && existing.source === 'manual') return null;   // the host's own choice wins over the camera
@@ -461,8 +501,10 @@
       const top = Array.isArray(message.top) ? message.top.slice(0, 3).filter(function (item) { return item && Games.isCard(item.card); }).map(function (item) { return { card: item.card, score: Number(item.score) || 0 }; }) : [];
       if (message.state === 'card' && Games.isCard(message.card)) {
         round.cards[zone] = { card: message.card, source: 'optical', score: Number(message.score) || 0, margin: Number(message.margin) || 0, top: top, shot: shot, at: Date.now() };
+        mark(round, zone, 'camera', 'card', message.card, round.cards[zone].score, round.cards[zone].margin);
       } else {
         round.cards[zone] = { card: null, source: 'optical', uncertain: true, top: top, shot: shot, at: Date.now() };
+        mark(round, zone, 'camera', 'unsure', top[0] ? top[0].card : null, top[0] ? top[0].score : 0);
         notifyStaff(table, 'warn', label + ' 認不出來，請手動選牌。');
       }
       markConflicts(round);

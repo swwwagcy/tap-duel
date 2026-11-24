@@ -256,6 +256,38 @@ const card = (socket, table, zone, value) => socket.send(JSON.stringify({ t: 'zo
   await viewer.screenshot({ path: path.join(__dirname, 'shots', 'viewer.png'), fullPage: true });
   await readerPage.screenshot({ path: path.join(__dirname, 'shots', 'reader.png') });
   assert.deepStrictEqual(errors, [], 'page errors: ' + errors.join(' | '));
+  /* Test log and the code for joining: the host's drawer sums up the camera's work, the CSV has a
+     row per position, and the QR code decodes to the viewer page's address. */
+  {
+    await host.click('#openDrawer');
+    await until(() => host.evaluate(() => /已確認 \d+ 回合/.test(document.getElementById('logSummary').textContent)), 'log summary shown');
+    const summary = await host.evaluate(() => document.getElementById('logSummary').textContent);
+    const csv = await host.evaluate(async () => {
+      const rounds = await new Promise(resolve => { const socket = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws'); socket.onopen = () => socket.send(JSON.stringify({ t: 'hello', role: 'host', key: JSON.parse(localStorage.getItem('tdl-staff-key')) })); socket.onmessage = event => { const message = JSON.parse(event.data); if (message.t === 'welcome') socket.send(JSON.stringify({ t: 'log', table: 'duel' })); if (message.t === 'log') { socket.close(); resolve(message.rounds); } }; });
+      return { rows: window.__hostLog.csv(rounds).split('\r\n'), totals: window.__hostLog.totals(rounds) };
+    });
+    assert.ok(csv.rows.length >= 3 && csv.rows[0].startsWith('回合,遊戲,結束方式'), 'csv has a heading and rows: ' + csv.rows.length);
+    assert.ok(csv.rows.some(row => /紅方,.*♠9|紅方,.*鏡頭|紅方/.test(row)), 'csv rows name the position');
+    assert.ok(csv.totals.cards >= 2 && csv.totals.camera + csv.totals.corrected + csv.totals.unread === csv.totals.cards, 'totals add up: ' + JSON.stringify(csv.totals));
+    const download = host.waitForEvent('download', { timeout: 8000 });
+    await host.click('#logDownload');
+    assert.ok(/^tap-duel-duel-\d+\.csv$/.test((await download).suggestedFilename()), 'the log downloads as a CSV file');
+    // The QR code must really decode to the viewer page.
+    const shot = await host.locator('#viewerQr').screenshot();
+    const decoded = await host.evaluate(async bytes => {
+      const image = new Image(); image.src = 'data:image/png;base64,' + bytes; await image.decode();
+      const canvas = document.createElement('canvas'); canvas.width = image.width; canvas.height = image.height;
+      const context = canvas.getContext('2d'); context.drawImage(image, 0, 0);
+      const data = context.getImageData(0, 0, canvas.width, canvas.height);
+      return { width: data.width, height: data.height, pixels: Array.from(data.data) };
+    }, shot.toString('base64'));
+    const found = require('jsqr')(Uint8ClampedArray.from(decoded.pixels), decoded.width, decoded.height);
+    assert.ok(found && found.data === BASE + '/play.html', 'the QR code reads as the viewer address: ' + (found && found.data));
+    assert.strictEqual(await host.evaluate(() => document.getElementById('viewerUrl').textContent), BASE + '/play.html');
+    await host.click('#closeDrawer');
+    step('test log: ' + summary + ' CSV downloads; QR code decodes to ' + found.data);
+  }
+
   /* Security: headers on every file, the reader key does not open the host console, and wrong
      keys lock the address out (this runs last: it locks this machine's own address). */
   const headers = await new Promise((resolve, reject) => http.get(BASE + '/host.html', response => { response.resume(); resolve(response.headers); }).on('error', reject));

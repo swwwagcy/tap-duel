@@ -17,6 +17,18 @@
   Live.escape = function (text) { return String(text == null ? '' : text).replace(/[&<>"']/g, function (ch) { return '&#' + ch.charCodeAt(0) + ';'; }); };
   Live.$ = function (id) { return document.getElementById(id); };
 
+  // A QR code for an address, as SVG (vendor/qrcode-generator.js must be on the page). Dark on a
+  // light square with a quiet margin, so a phone camera reads it off any screen.
+  Live.qrSvg = function (text) {
+    if (typeof qrcode !== 'function') return '';
+    var code = qrcode(0, 'M'); code.addData(text); code.make();
+    var count = code.getModuleCount(), margin = 3, size = count + margin * 2, path = '';
+    for (var row = 0; row < count; row++) for (var col = 0; col < count; col++) if (code.isDark(row, col)) path += 'M' + (col + margin) + ' ' + (row + margin) + 'h1v1h-1z';
+    return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + size + ' ' + size + '" role="img" aria-label="QR code" shape-rendering="crispEdges"><rect width="' + size + '" height="' + size + '" fill="#fff"/><path d="' + path + '" fill="#000"/></svg>';
+  };
+  // The address of another page of this site, as someone else would open it.
+  Live.pageUrl = function (page) { return new URL(page, location.href).href.replace(/[?#].*$/, '') + (Live.demo && !/\.github\.io$/.test(location.hostname) ? '?demo' : ''); };
+
   // Server time minus local time, refreshed from every message that carries serverNow.
   Live.offset = 0;
   Live.now = function () { return Date.now() + Live.offset; };
