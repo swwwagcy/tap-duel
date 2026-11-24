@@ -83,9 +83,10 @@
 
   // The table picture, held back by the stream delay so it lines up with what viewers are shown.
   var link = Live.connect({
-    hello: function () { return { t: 'hello', role: 'viewer', viewerId: 'room-preview' }; },
+    hello: function () { return { t: 'hello', role: 'viewer', viewerId: 'room-preview', key: Live.staffKey() }; },
     onStatus: function (online) { if (online) link.send({ t: 'watch', table: tableId }); },
     onMessage: function (message) {
+      if (message.t === 'denied') { Live.viewerDenied(link, message, function () { location.reload(); }); return; }   // reload: the sheet inside needs the key too
       if (message.t === 'table' && message.table.id === tableId) {
         delayMs = (message.table.streamDelay || 0) * 1000;
         $('delayText').textContent = '目前設定：' + (delayMs / 1000) + ' 秒。';

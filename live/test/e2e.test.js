@@ -15,7 +15,7 @@ const BASE = 'http://127.0.0.1:' + PORT;
 // Where the two positions are in a 1920 x 1080 camera picture, from the game's own layout.
 const DUEL = require('../public/games.js').GAMES.duel.layout;
 const centre = id => ({ x: (DUEL[id][0] + DUEL[id][2] / 2) * 1920, y: (DUEL[id][1] + DUEL[id][3] / 2) * 1080 });
-const KEY = 'test-key-for-staff', READER_KEY = 'test-key-for-reader';
+const KEY = 'test-key-for-staff', READER_KEY = 'test-key-for-reader', VIEWER_KEY = 'test-key-for-viewers';
 let server, browser;
 
 function wait(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
@@ -41,7 +41,7 @@ const clear = (socket, table, zones) => zones.forEach(zone => socket.send(JSON.s
 const card = (socket, table, zone, value) => socket.send(JSON.stringify({ t: 'zone', table, zone, state: 'card', card: value, score: 0.95, margin: 0.8, top: [{ card: value, score: 0.95 }] }));
 
 (async () => {
-  server = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], { env: Object.assign({}, process.env, { PORT: String(PORT), STAFF_KEY: KEY, READER_KEY: READER_KEY }), stdio: ['ignore', 'pipe', 'inherit'] });
+  server = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], { env: Object.assign({}, process.env, { PORT: String(PORT), STAFF_KEY: KEY, READER_KEY: READER_KEY, VIEWER_KEY: VIEWER_KEY }), stdio: ['ignore', 'pipe', 'inherit'] });
   await until(async () => { try { return (await fetch(BASE + '/health')).ok; } catch (error) { return false; } }, 'server start');
   step('server started');
 
@@ -53,7 +53,13 @@ const card = (socket, table, zone, value) => socket.send(JSON.stringify({ t: 'zo
   [host, viewer].forEach(page => page.on('pageerror', error => errors.push(error.message)));
 
   await host.goto(BASE + '/host.html#key=' + KEY);
+  // The viewer page needs the viewers' key: without it the page asks, and a wrong one is refused.
   await viewer.goto(BASE + '/play.html');
+  await viewer.waitForSelector('.keygate input');
+  await viewer.fill('.keygate input', 'not-the-key'); await viewer.click('.keygate button');
+  await viewer.waitForSelector('.keygate .bad');
+  await viewer.fill('.keygate input', VIEWER_KEY); await viewer.click('.keygate button');
+  await viewer.waitForSelector('.keygate', { state: 'detached' });
   await until(() => viewer.evaluate(() => document.getElementById('points').textContent === '10,000'), 'viewer points');
   await until(() => host.evaluate(() => document.querySelectorAll('.zone').length === 2), 'host zones');
   step('host and viewer pages loaded (viewer starts with 10,000)');
@@ -288,8 +294,8 @@ const card = (socket, table, zone, value) => socket.send(JSON.stringify({ t: 'zo
       return { width: data.width, height: data.height, pixels: Array.from(data.data) };
     }, shot.toString('base64'));
     const found = require('jsqr')(Uint8ClampedArray.from(decoded.pixels), decoded.width, decoded.height);
-    assert.ok(found && found.data === BASE + '/play.html', 'the QR code reads as the viewer address: ' + (found && found.data));
-    assert.strictEqual(await host.evaluate(() => document.getElementById('viewerUrl').textContent), BASE + '/play.html');
+    assert.ok(found && found.data === BASE + '/play.html#key=' + VIEWER_KEY, 'the QR code reads as the viewer address: ' + (found && found.data));
+    assert.strictEqual(await host.evaluate(() => document.getElementById('viewerUrl').textContent.split('（')[0]), BASE + '/play.html');
     await host.click('#closeDrawer');
     step('test log: ' + summary + ' CSV downloads; QR code decodes to ' + found.data);
   }
@@ -308,11 +314,22 @@ const card = (socket, table, zone, value) => socket.send(JSON.stringify({ t: 'zo
   assert.deepStrictEqual(await signIn('host', READER_KEY), { t: 'denied', locked: false }, 'reader key refused for the host console');
   assert.strictEqual((await signIn('reader', READER_KEY)).t, 'welcome');
   assert.strictEqual((await signIn('reader', KEY)).t, 'welcome', 'the host key still opens the reader');
+  const asViewer = key => new Promise((resolve, reject) => {
+    const socket = new WebSocket('ws://localhost:' + PORT + '/ws');
+    socket.on('open', () => { socket.send(JSON.stringify({ t: 'hello', role: 'viewer', key })); socket.send(JSON.stringify({ t: 'watch', table: 'duel' })); });
+    const got = []; socket.on('message', raw => got.push(JSON.parse(raw).t));
+    socket.on('error', reject);
+    setTimeout(() => { socket.close(); resolve(got); }, 400);
+  });
+  assert.deepStrictEqual(await asViewer(undefined), ['denied', 'error'], 'no key: refused, and no look at the table');
+  assert.deepStrictEqual(await asViewer(READER_KEY), ['denied', 'error'], 'the reader key does not open the viewer page');
+  assert.ok((await asViewer(VIEWER_KEY)).indexOf('table') >= 0, 'the viewers key opens it');
+  assert.ok((await asViewer(KEY)).indexOf('table') >= 0, 'so does the host key');
   const answers = [];
   for (let attempt = 0; attempt < 5; attempt++) answers.push((await signIn('host', 'guess-' + attempt)).locked);
   assert.deepStrictEqual(answers, [false, false, false, false, true], 'the fifth wrong key locks the address');
   assert.deepStrictEqual(await signIn('host', KEY), { t: 'denied', locked: true }, 'while locked, even the right key is refused');
-  step('security: headers set, reader key cannot host, fifth wrong key locks the address');
+  step('security: headers set, viewer page needs its key, reader key cannot host, fifth wrong key locks the address');
 
   step('no page errors');
   console.log('e2e ok');

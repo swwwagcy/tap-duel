@@ -18,6 +18,10 @@ else if (STAFF_KEY.length < 12) console.log('STAFF_KEY is shorter than 12 charac
 // Optional second key for the card reader only. A reader signed in with it cannot act as host.
 // The host key still opens the reader, so one key for both keeps working.
 const READER_KEY = process.env.READER_KEY || '';
+// Optional key for the viewer pages. When set, nobody can watch or play without it (the host key
+// also opens them). When not set, the viewer pages are open to anyone with the address.
+const VIEWER_KEY = process.env.VIEWER_KEY || '';
+if (!VIEWER_KEY) console.log('VIEWER_KEY is not set; the viewer pages are open to anyone with the address.');
 const MAX_CONNECTIONS = Number(process.env.MAX_CONNECTIONS) || 1200;
 const MESSAGES_PER_SECOND = 60;      // per connection; the reader sends about 10
 
@@ -32,10 +36,13 @@ function same(given, key) {
 const FAILURES_ALLOWED = Number(process.env.FAILURES_ALLOWED) || 5, FAILURE_WINDOW_MS = 10 * 60 * 1000, LOCK_MS = 10 * 60 * 1000;
 const failures = new Map();          // address -> { times: [ms], lockedUntil }
 function keyVerdict(given, role, connection) {
-  const address = connection && connection.address || 'unknown', now = Date.now();
+  if (role === 'viewer' && !VIEWER_KEY) return true;
+  // Viewers' wrong keys are counted apart from the staff's, so a viewer's typing mistakes on a
+  // shared network do not lock the host out.
+  const address = (role === 'viewer' ? 'viewer ' : '') + (connection && connection.address || 'unknown'), now = Date.now();
   let entry = failures.get(address);
   if (entry && entry.lockedUntil > now) return 'locked';
-  if (same(given, STAFF_KEY) || (role === 'reader' && same(given, READER_KEY))) { failures.delete(address); return true; }
+  if (same(given, STAFF_KEY) || (role === 'reader' && same(given, READER_KEY)) || (role === 'viewer' && same(given, VIEWER_KEY))) { failures.delete(address); return true; }
   if (!entry) { entry = { times: [], lockedUntil: 0 }; failures.set(address, entry); }
   entry.times = entry.times.filter(function (time) { return now - time < FAILURE_WINDOW_MS; });
   entry.times.push(now);
@@ -49,6 +56,7 @@ setInterval(function () {
 
 const engine = Engine.createEngine({
   staffKeyMatches: keyVerdict,
+  viewerKey: VIEWER_KEY,
   // One line per sign-in attempt and per action that changes a round, for the service's log.
   audit: function (entry) { console.log('audit ' + JSON.stringify(Object.assign({ at: new Date().toISOString() }, entry))); },
   newId: function () { return crypto.randomUUID(); },

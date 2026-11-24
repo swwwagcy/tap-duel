@@ -27,6 +27,7 @@
   function onMessage(message) {
     if (message.t === 'denied') { link.close(); Live.askStaffKey(start, message.locked ? 'locked' : true); return; }
     if (message.t === 'welcome') {
+      state.viewerKey = message.viewerKey || '';
       state.tables = message.tables;
       if (state.tables.indexOf(state.tableId) < 0) state.tableId = state.tables[0];
       buildTabs(); buildZones();
@@ -367,8 +368,10 @@
   $('openDrawer').addEventListener('click', function () {
     $('drawer').hidden = false; fillSettings(); renderHistory();
     link.send({ t: 'log', table: state.tableId });
+    // With a viewers' key set, the QR code carries it (the page keeps it and takes it out of the address); the printed address does not.
     var address = Live.pageUrl('play.html');
-    $('viewerQr').innerHTML = Live.qrSvg(address); $('viewerUrl').textContent = address;
+    $('viewerQr').innerHTML = Live.qrSvg(address + (state.viewerKey ? '#key=' + encodeURIComponent(state.viewerKey) : ''));
+    $('viewerUrl').textContent = address + (state.viewerKey ? '（QR 內含觀看密碼；手動輸入網址的人要另外給密碼）' : '');
   });
 
   /* ---------------- test log ---------------- */

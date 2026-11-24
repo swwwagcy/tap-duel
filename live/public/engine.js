@@ -7,12 +7,13 @@
 })(typeof self !== 'undefined' ? self : this, function (Games) {
   'use strict';
 
-  // options: staffKeyMatches(key, role, connection) -> true, false or 'locked'; newId() -> string;
+  // options: staffKeyMatches(key, role, connection) -> true, false or 'locked' (role is host, reader or viewer);
+  // viewerKey: the viewers' key, handed to the host so its QR code can carry it; newId() -> string;
   // bots: number of demo viewers; tableSettings: starting settings for every table;
   // audit(entry): called for every sign-in attempt and every action that changes a round.
   function createEngine(options) {
     options = options || {};
-    const staffKeyMatches = options.staffKeyMatches || function () { return false; };
+    const staffKeyMatches = options.staffKeyMatches || function (key, role) { return role === 'viewer'; };
     const newId = options.newId || function () { return 'v' + Math.random().toString(36).slice(2) + Date.now().toString(36); };
     const audit = options.audit || function () {};
     const timers = [];
@@ -539,10 +540,18 @@
         }
         audit({ action: 'sign-in', role: message.role, by: socket.address });
         socket.role = message.role;
-        send(socket, { t: 'welcome', role: socket.role, serverNow: Date.now(), tables: Object.keys(tables) });
+        const welcome = { t: 'welcome', role: socket.role, serverNow: Date.now(), tables: Object.keys(tables) };
+        if (socket.role === 'host' && options.viewerKey) welcome.viewerKey = options.viewerKey;
+        send(socket, welcome);
         return null;
       }
       if (message.role === 'viewer') {
+        const allowed = staffKeyMatches(message.key, 'viewer', socket);
+        if (allowed !== true) {
+          audit({ action: 'sign-in refused', role: 'viewer', locked: allowed === 'locked', by: socket.address });
+          send(socket, { t: 'denied', locked: allowed === 'locked' });
+          return null;
+        }
         let id = String(message.viewerId || '').replace(/[^a-zA-Z0-9-]/g, '').slice(0, 40) || newId();
         if (/^bot-/.test(id)) id = newId();          // the demo viewers' own ids are not for the taking
         if (!viewers.has(id)) forgetIdleViewers();

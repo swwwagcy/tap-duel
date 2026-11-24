@@ -10,12 +10,13 @@
   var state = { tableId: ((/[?&]table=(\w+)/.exec(location.search) || [])[1] || Live.store.get('tdl-viewer-table', 'duel')), table: null, chips: [10, 50, 100, 500, 1000], chip: Live.store.get('tdl-viewer-chip', 100), points: null, picks: {}, refillBelow: 1000, lastResult: null, frameAt: 0 };
 
   var link = Live.connect({
-    hello: function () { return { t: 'hello', role: 'viewer', viewerId: me.id, name: me.name }; },
+    hello: function () { return { t: 'hello', role: 'viewer', viewerId: me.id, name: me.name, key: Live.staffKey() }; },
     onStatus: function (online) { if (online) link.send({ t: 'watch', table: state.tableId }); offlineBanner(!online); },
     onMessage: onMessage
   });
 
   function onMessage(message) {
+    if (message.t === 'denied') { Live.viewerDenied(link, message); return; }
     if (message.t === 'welcome') {
       state.chips = message.chips || state.chips;
       state.refillBelow = message.refillBelow || state.refillBelow;

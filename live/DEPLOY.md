@@ -165,6 +165,27 @@ gcloud run services update tap-duel-live --region asia-east1 --update-secrets RE
 
 設了之後：讀牌器的密碼只能開讀牌器，**不能進主持台、不能確認結果**；主持台的密碼兩邊都能開。架在桌上的那支手機只需要知道讀牌器的密碼。
 
+**選用：觀眾端也要密碼。** 預設觀眾頁（`play.html`、半屏 `sheet.html`、直播間預覽 `room.html`）知道網址就能開。只想讓特定的人進來時，再設一組觀看密碼：
+
+```bash
+printf '%s' '觀看密碼' | gcloud secrets create tap-duel-viewer-key --data-file=-
+gcloud secrets add-iam-policy-binding tap-duel-viewer-key \
+  --member="serviceAccount:$(gcloud projects describe $(gcloud config get-value project) --format='value(projectNumber)')-compute@developer.gserviceaccount.com" \
+  --role=roles/secretmanager.secretAccessor
+gcloud run services update tap-duel-live --region asia-east1 --update-secrets VIEWER_KEY=tap-duel-viewer-key:latest
+```
+
+內部測試用的簡化版：`gcloud run services update tap-duel-live --region asia-east1 --update-env-vars VIEWER_KEY=觀看密碼`。
+
+設了之後：
+
+- 沒有密碼的人打開觀眾頁會先看到輸入密碼的畫面，連牌桌狀態都看不到。輸入一次後這台裝置會記住。
+- 主持台「設定」裡的觀眾 QR code 會自動帶上觀看密碼，掃了直接進場；手動輸入網址的人要另外告訴他密碼。**QR code 等於密碼，不要讓它出現在公開的直播畫面上。**
+- 觀看密碼只能開觀眾頁，不能進主持台或讀牌器；主持台的密碼也能開觀眾頁。
+- 觀眾輸錯密碼的次數和工作人員分開計算，同一個辦公室網路的觀眾打錯不會把主持台鎖住。
+- 要嵌進別的頁面時，網址後面加 `#key=觀看密碼`（`#` 之後的內容不會送到伺服器，也不會進 log）。
+- 拿掉密碼：`gcloud run services update tap-duel-live --region asia-east1 --remove-secrets VIEWER_KEY`（簡化版用 `--remove-env-vars VIEWER_KEY`）。
+
 ## 9. 換密碼
 
 先確認部署時用的是哪一種方式：

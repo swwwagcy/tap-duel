@@ -71,7 +71,7 @@
       Live.demoAlone = true;
       transport = overEngine(Live.localEngine);
     }
-    var api = { online: true, send: function (message) { transport.post(message); }, close: function () { transport.close(); } };
+    var api = { online: true, send: function (message) { transport.post(message); }, close: function () { transport.close(); }, reopen: function () {} };
     setTimeout(function () { transport.post(options.hello()); if (options.onStatus) options.onStatus(true); }, 0);
     return api;
   }
@@ -86,7 +86,8 @@
         if (socket && socket.readyState === 1) socket.send(JSON.stringify(message));
         else queue.push(message);
       },
-      close: function () { closedByPage = true; if (socket) socket.close(); }
+      close: function () { closedByPage = true; if (socket) socket.close(); },
+      reopen: function () { closedByPage = false; open(); }
     };
     function open() {
       var url = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws';
@@ -120,7 +121,9 @@
   // (#key=...) and is then kept on this device and removed from the address.
   // The reader may have a key of its own (READER_KEY), so each page remembers its key separately.
   // A reader that has none yet uses the key the host page stored on the same device.
-  function keySlot() { return /reader\.html$/.test(location.pathname) ? 'tdl-reader-key' : 'tdl-staff-key'; }
+  // The viewer pages (everything but host and reader) have their own slot too, for VIEWER_KEY.
+  var staffPage = /(host|reader)\.html$/.test(location.pathname);
+  function keySlot() { return /reader\.html$/.test(location.pathname) ? 'tdl-reader-key' : staffPage ? 'tdl-staff-key' : 'tdl-viewer-key'; }
   Live.staffKey = function () {
     if (Live.demo) return 'demo';
     var match = /(?:^|[#&])key=([^&]+)/.exec(location.hash);
@@ -135,7 +138,7 @@
     var old = document.querySelector('.keygate'); if (old) old.remove();
     var box = document.createElement('div');
     box.className = 'keygate';
-    box.innerHTML = '<form><h2>輸入工作人員密碼</h2>' + (wrong === 'locked' ? '<p class="bad">密碼錯太多次，這個網路位址暫時被鎖住。請等 10 分鐘再試。</p>' : wrong ? '<p class="bad">密碼不對，請再輸入一次。</p>' : '<p>主持台與讀牌器需要密碼，部署時設定在 STAFF_KEY。</p>') +
+    box.innerHTML = '<form><h2>' + (staffPage ? '輸入工作人員密碼' : '輸入觀看密碼') + '</h2>' + (wrong === 'locked' ? '<p class="bad">密碼錯太多次，這個網路位址暫時被鎖住。請等 10 分鐘再試。</p>' : wrong ? '<p class="bad">密碼不對，請再輸入一次。</p>' : (staffPage ? '<p>主持台與讀牌器需要密碼，部署時設定在 STAFF_KEY。</p>' : '<p>這個頁面需要密碼，請向主持人索取。</p>')) +
       '<input id="keyInput" type="password" autocomplete="current-password" required><button class="primary" type="submit">進入</button></form>';
     document.body.appendChild(box);
     box.querySelector('form').addEventListener('submit', function (event) {
@@ -147,6 +150,12 @@
       onKey(key);
     });
     box.querySelector('input').focus();
+  };
+
+  // A viewer page that was refused: stop reconnecting (each try counts as a wrong key), ask, connect again.
+  Live.viewerDenied = function (link, message, after) {
+    link.close();
+    Live.askStaffKey(function () { if (after) after(); else link.reopen(); }, message.locked ? 'locked' : Live.store.get(keySlot(), '') || Live.store.get('tdl-staff-key', '') ? true : false);
   };
 
   var toastTimer = null;

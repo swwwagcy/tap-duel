@@ -66,8 +66,9 @@ check('checkComplete catches missing, extra and duplicate cards', () => {
 
 // The engine takes messages from anyone who can open a connection.
 const Engine = require('../public/engine.js');
+let viewerKey = null;   // null: the viewer pages are open
 function withEngine(fn) {
-  const engine = Engine.createEngine({ staffKeyMatches: (key) => key === 'k' });
+  const engine = Engine.createEngine({ staffKeyMatches: (key, role) => role === 'viewer' ? viewerKey === null || key === viewerKey : key === 'k' });
   const open = () => { const got = []; const connection = { deliver: (message) => got.push(message) }; engine.connect(connection); return { connection, got, say: (message) => engine.receive(connection, JSON.stringify(message)) }; };
   try { fn(engine, open); } finally { engine.stop(); }
 }
@@ -140,7 +141,7 @@ check('demo viewers cannot be impersonated, and remembered viewers have a limit'
 
 check('sign-ins and round actions are written to the audit trail, a locked sign-in says so', () => {
   const trail = [];
-  const engine = Engine.createEngine({ staffKeyMatches: (key, role) => key === 'locked-out' ? 'locked' : key === 'k' || (role === 'reader' && key === 'r'), audit: (entry) => trail.push(entry) });
+  const engine = Engine.createEngine({ staffKeyMatches: (key, role) => key === 'locked-out' ? 'locked' : role === 'viewer' || key === 'k' || (role === 'reader' && key === 'r'), audit: (entry) => trail.push(entry) });
   try {
     const open = () => { const got = []; const connection = { address: '203.0.113.9', deliver: (message) => got.push(message) }; engine.connect(connection); return { got, say: (message) => engine.receive(connection, JSON.stringify(message)) }; };
     const wrong = open(); wrong.say({ t: 'hello', role: 'host', key: 'nope' });
@@ -199,8 +200,32 @@ check('the test log records what the camera read and where the host stepped in',
 
 // With a stream delay, viewers must not be ahead of the video: no card faces while dealing, and
 // the result only once the delay has passed. Points are settled at once on the server all the same.
+check('with a viewers key set, a viewer without it gets nothing; the host is handed the key for its QR code', () => {
+  viewerKey = 'v';
+  try {
+    withEngine((engine, open) => {
+      const outsider = open(); outsider.say({ t: 'hello', role: 'viewer' }); outsider.say({ t: 'watch', table: 'duel' }); outsider.say({ t: 'pick', table: 'duel', spot: 'R', amount: 100 });
+      assert.deepStrictEqual(outsider.got.map((message) => message.t), ['denied', 'error', 'error']);
+      const wrong = open(); wrong.say({ t: 'hello', role: 'viewer', key: 'k' });
+      assert.strictEqual(wrong.got[0].t, 'denied');
+      const viewer = open(); viewer.say({ t: 'hello', role: 'viewer', key: 'v' }); viewer.say({ t: 'watch', table: 'duel' });
+      assert.ok(viewer.got.some((message) => message.t === 'table'));
+      assert.strictEqual(viewer.got[0].viewerKey, undefined, 'a viewer is not told the key');
+    });
+    const engine = Engine.createEngine({ staffKeyMatches: () => true, viewerKey: 'v' });
+    try {
+      const got = []; const connection = { deliver: (message) => got.push(message) }; engine.connect(connection);
+      engine.receive(connection, JSON.stringify({ t: 'hello', role: 'host', key: 'k' }));
+      assert.strictEqual(got[0].viewerKey, 'v');
+      const reader = []; const second = { deliver: (message) => reader.push(message) }; engine.connect(second);
+      engine.receive(second, JSON.stringify({ t: 'hello', role: 'reader', key: 'k' }));
+      assert.strictEqual(reader[0].viewerKey, undefined, 'the reader is not handed it');
+    } finally { engine.stop(); }
+  } finally { viewerKey = null; }
+});
+
 const delayed = (async () => {
-  const engine = Engine.createEngine({ staffKeyMatches: (key) => key === 'k', tableSettings: { streamDelay: 0.4 } });
+  const engine = Engine.createEngine({ staffKeyMatches: (key, role) => role === 'viewer' || key === 'k', tableSettings: { streamDelay: 0.4 } });
   try {
     const open = () => { const got = []; const connection = { deliver: (message) => got.push(JSON.parse(JSON.stringify(message))) }; engine.connect(connection); return { got, say: (message) => engine.receive(connection, JSON.stringify(message)) }; };
     const last = (who) => who.got.filter((message) => message.t === 'table').pop().table;
