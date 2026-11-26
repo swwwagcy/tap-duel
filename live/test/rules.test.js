@@ -123,7 +123,8 @@ check('the presenter screen watches only; like the host it sees totals, people p
   assert.deepStrictEqual(onStage.spotPickers, { R: 2, T: 1 });
   assert.strictEqual(onStage.roundTotal, 650);
   ['settings', 'history', 'readerInfo', 'check', 'watchers', 'spotLimit'].forEach((key) => assert.ok(!(key in onStage), 'stage sees no ' + key));
-  assert.strictEqual(onStage.players[0].who, 'B*', 'the presenter sees who chose, masked');
+  assert.strictEqual(onStage.players[0].who, 'Bo', 'the presenter sees the whole name, to call it out');
+  assert.strictEqual(onStage.players[1].who, '王小明');
   assert.strictEqual(onStage.feed.length, 3);
   assert.ok(!('shot' in (onStage.cards.R || {})));
   const onHost = host.got.find((message) => message.t === 'table').table;

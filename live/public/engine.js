@@ -104,9 +104,10 @@
       if (chars.length === 2) return chars[0] + '*';
       return chars[0] + '*'.repeat(Math.min(chars.length - 2, 3)) + chars[chars.length - 1];
     }
-    function whoOf(viewerId) {
-      const viewer = viewers.get(viewerId);
-      return { who: maskName(viewer ? viewer.name : ''), tag: String(viewerId).replace(/^bot-/, 'b').slice(0, 4) };
+    // full: the presenter's screen shows the whole name, to call it out; the host console keeps the mask.
+    function whoOf(viewerId, full) {
+      const viewer = viewers.get(viewerId), name = viewer ? viewer.name : '';
+      return { who: full ? name : maskName(name), tag: String(viewerId).replace(/^bot-/, 'b').slice(0, 4) };
     }
     function pickSummary(round) {
       const spotPickers = {};
@@ -117,17 +118,17 @@
       });
       return { spotPickers: spotPickers, roundTotal: roundTotal };
     }
-    function pickDetail(round) {
+    function pickDetail(round, full) {
       const players = [], feed = [];
       if (round) round.picks.forEach(function (list, viewerId) {
         const spots = {};
         let total = 0;
         list.forEach(function (pick) {
           spots[pick.spot] = (spots[pick.spot] || 0) + pick.amount; total += pick.amount;
-          feed.push(Object.assign({ spot: pick.spot, amount: pick.amount, at: pick.at || 0 }, whoOf(viewerId)));
+          feed.push(Object.assign({ spot: pick.spot, amount: pick.amount, at: pick.at || 0 }, whoOf(viewerId, full)));
         });
         const near = Object.keys(spots).some(function (spot) { return spots[spot] >= SPOT_LIMIT * NEAR_LIMIT; });
-        players.push(Object.assign({ spots: spots, total: total, near: near }, whoOf(viewerId)));
+        players.push(Object.assign({ spots: spots, total: total, near: near }, whoOf(viewerId, full)));
       });
       players.sort(function (a, b) { return b.total - a.total; });
       feed.sort(function (a, b) { return b.at - a.at; });
@@ -183,10 +184,10 @@
         auto: table.settings.auto
       };
       // The presenter's screen and the host console also see how many chose each spot, the round's
-      // total, and who chose what (names masked), so the presenter can call picks out as they come.
+      // total, and who chose what, so the presenter can call picks out as they come.
       if (role !== 'viewer') {
         Object.assign(view, pickSummary(round));
-        const detail = pickDetail(round);
+        const detail = pickDetail(round, role === 'stage');
         view.players = detail.players; view.playerCount = detail.playerCount; view.feed = detail.feed;
       }
       if (role === 'staff') {
