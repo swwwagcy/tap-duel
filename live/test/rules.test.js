@@ -105,7 +105,7 @@ check('a viewer gets the viewer view, staff get the staff view', () => withEngin
   assert.ok('history' in host.got.find((message) => message.t === 'table').table);
 }));
 
-check('the presenter screen watches only; it sees totals and people per spot, the host also sees every pick', () => withEngine((engine, open) => {
+check('the presenter screen watches only; like the host it sees totals, people per spot and every pick', () => withEngine((engine, open) => {
   const host = open(); host.say({ t: 'hello', role: 'host', key: 'k' }); host.say({ t: 'watch', table: 'duel' });
   const stage = open(); stage.say({ t: 'hello', role: 'stage', key: 'k' }); stage.say({ t: 'watch', table: 'duel' });
   assert.strictEqual(stage.got[0].t, 'welcome');
@@ -122,7 +122,10 @@ check('the presenter screen watches only; it sees totals and people per spot, th
   const onStage = stage.got.find((message) => message.t === 'table').table;
   assert.deepStrictEqual(onStage.spotPickers, { R: 2, T: 1 });
   assert.strictEqual(onStage.roundTotal, 650);
-  ['players', 'feed', 'settings', 'history', 'readerInfo', 'check', 'watchers'].forEach((key) => assert.ok(!(key in onStage), 'stage sees no ' + key));
+  ['settings', 'history', 'readerInfo', 'check', 'watchers', 'spotLimit'].forEach((key) => assert.ok(!(key in onStage), 'stage sees no ' + key));
+  assert.strictEqual(onStage.players[0].who, 'B*', 'the presenter sees who chose, masked');
+  assert.strictEqual(onStage.feed.length, 3);
+  assert.ok(!('shot' in (onStage.cards.R || {})));
   const onHost = host.got.find((message) => message.t === 'table').table;
   assert.strictEqual(onHost.players[0].total, 500, 'largest first');
   assert.strictEqual(onHost.players[0].who, 'B*', 'names are masked');

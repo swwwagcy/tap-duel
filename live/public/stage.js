@@ -63,6 +63,17 @@
       tile.querySelector('.people').textContent = (people[id] || 0) + ' 人';
       tile.classList.toggle('won', table.phase === 'result' && !!table.outcome && current.returned(id, 100, table.outcome) > 100);
     });
+    // Who chose what: the newest picks (fresh ones marked for a few seconds), then the round's largest.
+    var spotOf = function (id) { var spot = current.spots.filter(function (item) { return item.id === id; })[0]; return spot ? '<span class="' + spot.side + '">' + Live.escape(spot.label) + '</span>' : Live.escape(id); };
+    var name = function (row) { return '<span class="name">' + Live.escape(row.who) + '<small>' + Live.escape(row.tag) + '</small></span>'; };
+    var now = Live.now();
+    $('feed').innerHTML = (table.feed || []).slice(0, 5).map(function (pick) {
+      return '<div class="r' + (now - pick.at < 4000 ? ' new' : '') + '">' + name(pick) + '<span class="amount">+' + number(pick.amount) + '</span><span class="where">' + spotOf(pick.spot) + '</span></div>';
+    }).join('') || '<p class="none">' + (table.phase === 'open' ? '還沒有人選擇。' : '這一回合沒有選擇。') + '</p>';
+    $('top').innerHTML = (table.players || []).slice(0, 3).map(function (row) {
+      var spots = Object.keys(row.spots).map(function (id) { return spotOf(id) + ' ' + number(row.spots[id]); }).join('・');
+      return '<div class="r">' + name(row) + '<span class="amount">' + number(row.total) + '</span><span class="where">' + spots + '</span></div>';
+    }).join('');
     $('total').textContent = number(table.roundTotal);
     $('people').textContent = number(table.pickers);
     $('cards').innerHTML = current.zones.map(function (zone) {

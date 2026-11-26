@@ -182,11 +182,14 @@
         stale: ['idle', 'result', 'void'].indexOf(phase) >= 0 ? staleZones(table) : [],
         auto: table.settings.auto
       };
-      // The presenter's screen and the host console also see how many chose each spot and the round's total.
-      if (role !== 'viewer') Object.assign(view, pickSummary(round));
-      if (role === 'staff') {
+      // The presenter's screen and the host console also see how many chose each spot, the round's
+      // total, and who chose what (names masked), so the presenter can call picks out as they come.
+      if (role !== 'viewer') {
+        Object.assign(view, pickSummary(round));
         const detail = pickDetail(round);
         view.players = detail.players; view.playerCount = detail.playerCount; view.feed = detail.feed;
+      }
+      if (role === 'staff') {
         view.watchers = watchersOf(table);
         view.spotLimit = SPOT_LIMIT;
         view.settings = table.settings;

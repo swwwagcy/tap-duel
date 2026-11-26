@@ -79,6 +79,7 @@ async function playRound(page, table, spot) {
     page.on('pageerror', error => errors.push(error.message));
     page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
     await page.goto(base + '/demo.html');
+    await until(() => page.frames().some(item => /stage\.html/.test(item.url())), 'overview includes the presenter screen');
     await playRound(page, 'duel', 'R');
     await page.screenshot({ path: path.join(__dirname, 'shots', 'demo-duel.png') });
     await page.click('#gameTabs button[data-table="nine"]');
@@ -108,6 +109,7 @@ async function playRound(page, table, spot) {
       await until(() => stage.evaluate(() => Number(document.querySelector('.spot[data-spot="U"] .amount').textContent.replace(/,/g, '')) >= 100), 'stage shows the pick in its spot total');
       assert.ok(await stage.evaluate(() => /\d+ 人/.test(document.querySelector('.spot[data-spot="U"] .people').textContent)), 'people per spot shown');
       assert.strictEqual(await stage.evaluate(() => document.querySelectorAll('.stage button:not(.tabs button)').length), 0, 'the presenter screen has nothing to press');
+      await until(() => stage.evaluate(() => /\+100/.test(document.getElementById('feed').textContent) && document.querySelectorAll('#top .r').length >= 1), 'stage lists who chose what');
       await until(() => host.evaluate(() => /\+100/.test(document.getElementById('detailList').textContent) || /藍方 \d/.test(document.getElementById('detailList').textContent)), 'host lists the pick in its detail');
       // The viewer page shows how the room's points split and keeps the results as a six-row grid.
       await until(() => viewer.evaluate(() => document.querySelectorAll('#share .sharebar span').length >= 1), 'viewer page shows the share bar');
