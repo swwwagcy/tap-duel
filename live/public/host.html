@@ -132,14 +132,15 @@
   .hist .c { display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 11px; color: var(--muted); }
   .hist .c img { width: 40px; height: 54px; object-fit: cover; border-radius: 4px; }
   @media (max-aspect-ratio: 1/1) {
-    .main { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1.5fr) auto; }
+    .main { grid-template-columns: 1fr; grid-template-rows: minmax(170px, 1fr) auto; }
     .side { grid-template-columns: 1fr 1fr; grid-template-rows: auto; }
-    .camera { height: clamp(150px, 24vh, 300px); }
+    .camera { height: clamp(120px, 19vh, 260px); }
     .notes { display: none; }
   }
   @media (max-aspect-ratio: 1/1) {
     .side { grid-template-areas: "camera totals" "awake awake" "detail detail"; grid-template-rows: auto auto auto; }
-    .detail { max-height: 30vh; }
+    /* A fixed height: the list scrolls inside it, so picks coming in never push the card positions smaller. */
+    .detail { height: clamp(112px, 17vh, 220px); }
   }
   @media (max-width: 560px) { .top { grid-template-columns: 1fr auto; } .phasebox { grid-column: 1 / -1; grid-row: 2; } .zone .shot { display: none; } .camera .state { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } }
 </style>
