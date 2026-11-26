@@ -122,8 +122,8 @@
   // The reader may have a key of its own (READER_KEY), so each page remembers its key separately.
   // A reader that has none yet uses the key the host page stored on the same device.
   // The viewer pages (everything but host and reader) have their own slot too, for VIEWER_KEY.
-  var staffPage = /(host|reader)\.html$/.test(location.pathname);
-  function keySlot() { return /reader\.html$/.test(location.pathname) ? 'tdl-reader-key' : staffPage ? 'tdl-staff-key' : 'tdl-viewer-key'; }
+  var staffPage = /(host|reader|stage)\.html$/.test(location.pathname);
+  function keySlot() { return /reader\.html$/.test(location.pathname) ? 'tdl-reader-key' : /stage\.html$/.test(location.pathname) ? 'tdl-stage-key' : staffPage ? 'tdl-staff-key' : 'tdl-viewer-key'; }
   Live.staffKey = function () {
     if (Live.demo) return 'demo';
     var match = /(?:^|[#&])key=([^&]+)/.exec(location.hash);
@@ -138,7 +138,7 @@
     var old = document.querySelector('.keygate'); if (old) old.remove();
     var box = document.createElement('div');
     box.className = 'keygate';
-    box.innerHTML = '<form><h2>' + (staffPage ? '輸入工作人員密碼' : '輸入觀看密碼') + '</h2>' + (wrong === 'locked' ? '<p class="bad">密碼錯太多次，這個網路位址暫時被鎖住。請等 10 分鐘再試。</p>' : wrong ? '<p class="bad">密碼不對，請再輸入一次。</p>' : (staffPage ? '<p>主持台與讀牌器需要密碼，部署時設定在 STAFF_KEY。</p>' : '<p>這個頁面需要密碼，請向主持人索取。</p>')) +
+    box.innerHTML = '<form><h2>' + (staffPage ? '輸入工作人員密碼' : '輸入觀看密碼') + '</h2>' + (wrong === 'locked' ? '<p class="bad">密碼錯太多次，這個網路位址暫時被鎖住。請等 10 分鐘再試。</p>' : wrong ? '<p class="bad">密碼不對，請再輸入一次。</p>' : (staffPage ? '<p>主持台、讀牌器與主持人畫面需要密碼（主持人畫面也接受讀牌器的密碼）。</p>' : '<p>這個頁面需要密碼，請向主持人索取。</p>')) +
       '<input id="keyInput" type="password" autocomplete="current-password" required><button class="primary" type="submit">進入</button></form>';
     document.body.appendChild(box);
     box.querySelector('form').addEventListener('submit', function (event) {

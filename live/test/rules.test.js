@@ -105,6 +105,43 @@ check('a viewer gets the viewer view, staff get the staff view', () => withEngin
   assert.ok('history' in host.got.find((message) => message.t === 'table').table);
 }));
 
+check('the presenter screen watches only; it sees totals and people per spot, the host also sees every pick', () => withEngine((engine, open) => {
+  const host = open(); host.say({ t: 'hello', role: 'host', key: 'k' }); host.say({ t: 'watch', table: 'duel' });
+  const stage = open(); stage.say({ t: 'hello', role: 'stage', key: 'k' }); stage.say({ t: 'watch', table: 'duel' });
+  assert.strictEqual(stage.got[0].t, 'welcome');
+  const wrong = open(); wrong.say({ t: 'hello', role: 'stage', key: 'nope' });
+  assert.strictEqual(wrong.got[0].t, 'denied');
+  host.say({ t: 'open', table: 'duel' });
+  const one = open(); one.say({ t: 'hello', role: 'viewer', viewerId: 'one', name: '王小明' }); one.say({ t: 'watch', table: 'duel' });
+  const two = open(); two.say({ t: 'hello', role: 'viewer', viewerId: 'two', name: 'Bo' });
+  one.say({ t: 'pick', table: 'duel', spot: 'R', amount: 100 }); one.say({ t: 'pick', table: 'duel', spot: 'T', amount: 50 });
+  two.say({ t: 'pick', table: 'duel', spot: 'R', amount: 500 });
+  const tables = engine.tables.duel;
+  stage.got.length = 0; host.got.length = 0; one.got.length = 0;
+  stage.say({ t: 'watch', table: 'duel' }); host.say({ t: 'watch', table: 'duel' }); one.say({ t: 'watch', table: 'duel' });
+  const onStage = stage.got.find((message) => message.t === 'table').table;
+  assert.deepStrictEqual(onStage.spotPickers, { R: 2, T: 1 });
+  assert.strictEqual(onStage.roundTotal, 650);
+  ['players', 'feed', 'settings', 'history', 'readerInfo', 'check', 'watchers'].forEach((key) => assert.ok(!(key in onStage), 'stage sees no ' + key));
+  const onHost = host.got.find((message) => message.t === 'table').table;
+  assert.strictEqual(onHost.players[0].total, 500, 'largest first');
+  assert.strictEqual(onHost.players[0].who, 'B*', 'names are masked');
+  assert.strictEqual(onHost.players[1].who, '王*明');
+  assert.deepStrictEqual(onHost.players[1].spots, { R: 100, T: 50 });
+  assert.strictEqual(onHost.feed.length, 3);
+  assert.strictEqual(onHost.watchers, 1, 'one viewer is watching this table');
+  const onViewer = one.got.find((message) => message.t === 'table').table;
+  ['players', 'feed', 'spotPickers', 'roundTotal', 'watchers'].forEach((key) => assert.ok(!(key in onViewer), 'viewer sees no ' + key));
+  // The presenter screen cannot act.
+  stage.say({ t: 'void', table: 'duel' }); stage.say({ t: 'close', table: 'duel' });
+  assert.strictEqual(tables.phase, 'open');
+  assert.ok(stage.got.some((message) => message.t === 'error'));
+  // Near the per-spot limit is flagged for the host.
+  tables.round.picks.get('two')[0].amount = 19000;
+  host.got.length = 0; host.say({ t: 'watch', table: 'duel' });
+  assert.strictEqual(host.got.find((message) => message.t === 'table').table.players[0].near, true);
+}));
+
 check('a reader cannot plant markup in a picture, and odd pictures are dropped', () => withEngine((engine, open) => {
   const host = open(); host.say({ t: 'hello', role: 'host', key: 'k' }); host.say({ t: 'watch', table: 'duel' });
   const reader = open(); reader.say({ t: 'hello', role: 'reader', key: 'k' });

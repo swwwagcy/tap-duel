@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Tap Duel Live 主持人畫面</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  /* The screen in front of the presenter, out of the stream's frame. Read-only and readable from a
+     metre away: the countdown, how the room has chosen, and which position gets the next card.
+     The countdown runs early by the stream delay, so a call of "five seconds" reaches viewers in step
+     with their own countdown. */
+  html, body { height: 100%; }
+  body { overflow: hidden; }
+  .stage { height: 100%; display: grid; grid-template-rows: auto minmax(0, 1fr) auto auto; gap: 2vh;
+    padding: calc(2vh + env(safe-area-inset-top, 0px)) max(3vw, env(safe-area-inset-right, 0px)) calc(2vh + env(safe-area-inset-bottom, 0px)) max(3vw, env(safe-area-inset-left, 0px)); }
+  .top { display: grid; grid-template-columns: auto 1fr auto; gap: 2vw; align-items: center; }
+  .top .tabs { justify-self: end; }
+  .top .tabs button { min-height: 36px; font-size: 14px; flex: none; }
+  .round { font-size: clamp(14px, 2.4vh, 20px); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .round b { font-family: var(--font-num); color: var(--fg); }
+  .hero { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.6fr); gap: 3vw; min-height: 0; }
+  .clock { background: var(--surface); border-radius: 18px; border: 4px solid var(--line); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1vh; min-height: 0; padding: 2vh 1vw; text-align: center; }
+  .clock .big { font-family: var(--font-num); font-weight: 700; font-size: clamp(56px, 24vh, 220px); line-height: 1; }
+  .clock .word { font-size: clamp(18px, 4.4vh, 40px); font-weight: 700; }
+  .clock .say { font-size: clamp(14px, 2.6vh, 22px); color: var(--muted); }
+  .clock[data-phase="open"] { border-color: var(--fg); }
+  .clock[data-phase="open"].last { border-color: var(--wait); }
+  .clock[data-phase="open"].last .big { color: var(--wait); }
+  .clock[data-phase="closed"] { border-color: var(--wait); }
+  .clock[data-phase="closed"] .big, .clock[data-phase="dealing"] .big { font-size: clamp(40px, 14vh, 130px); }
+  .clock[data-phase="dealing"] { border-color: var(--go); }
+  .clock[data-phase="dealing"] .big { color: var(--go); }
+  .clock[data-phase="result"] .big { font-size: clamp(36px, 11vh, 110px); }
+  .spots { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 1.6vw; min-height: 0; }
+  .spot { background: var(--surface); border-radius: 18px; border: 4px solid var(--line); display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 1vh; min-height: 0; padding: 1.6vh 0.8vw; text-align: center; }
+  .spot .label { font-size: clamp(18px, 4.6vh, 42px); font-weight: 700; }
+  .spot .amount { font-family: var(--font-num); font-weight: 700; font-size: clamp(26px, 8vh, 80px); line-height: 1.05; }
+  .spot .people { font-size: clamp(14px, 2.8vh, 24px); color: var(--muted); }
+  .spot.red { border-color: var(--red); } .spot.red .label { color: var(--red); }
+  .spot.blue { border-color: var(--blue); } .spot.blue .label { color: var(--blue); }
+  .spot.tie { border-color: var(--tie); } .spot.tie .label { color: var(--tie); }
+  .spot.won { background: rgba(55, 197, 138, .2); border-color: var(--go); }
+  .strip { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 2vw; align-items: center; background: var(--surface); border-radius: 14px; padding: 1.2vh 1.6vw; font-size: clamp(14px, 2.6vh, 22px); }
+  .strip b { font-family: var(--font-num); }
+  .table { display: flex; gap: 1vw; align-items: center; justify-content: center; flex-wrap: wrap; }
+  .table .slot { display: flex; align-items: center; gap: .4em; }
+  .table .slot.next { outline: 3px solid var(--go); outline-offset: 3px; border-radius: 8px; }
+  .table .cardface { font-size: clamp(11px, 2.4vh, 18px); }
+  .hint { text-align: center; font-size: clamp(14px, 2.6vh, 22px); color: var(--muted); min-height: 1.5em; }
+  @media (max-aspect-ratio: 1/1) {
+    body { overflow: auto; }
+    .stage { height: auto; min-height: 100%; }
+    .hero { grid-template-columns: 1fr; }
+    .clock .big { font-size: clamp(56px, 18vh, 160px); }
+    .spots { grid-auto-flow: row; grid-auto-columns: auto; }
+    .strip { grid-template-columns: 1fr; text-align: center; }
+  }
+</style>
+</head>
+<body>
+<div class="stage">
+  <div class="top">
+    <span class="phase" id="phase" data-phase="idle">待開始</span>
+    <span class="round">回合 <b id="round">—</b></span>
+    <div class="tabs" id="tableTabs"></div>
+  </div>
+  <div class="hero">
+    <div class="clock" id="clock" data-phase="idle">
+      <span class="big num" id="count">—</span>
+      <span class="word" id="word">等主持台開始</span>
+      <span class="say" id="say"></span>
+    </div>
+    <div class="spots" id="spots"></div>
+  </div>
+  <div class="strip">
+    <span>本回合 <b id="total">0</b> 點</span>
+    <div class="table" id="cards"></div>
+    <span><b id="people">0</b> 人參與</span>
+  </div>
+  <div class="hint" id="hint">這個畫面只能看，不能操作。開始、確認與取消都在主持台。</div>
+</div>
+<div id="toast" class="toast" role="status"></div>
+<script src="games.js"></script>
+<script src="engine.js"></script>
+<script src="common.js"></script>
+<script src="stage.js"></script>
+</body>
+</html>

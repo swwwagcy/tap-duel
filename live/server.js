@@ -42,7 +42,8 @@ function keyVerdict(given, role, connection) {
   const address = (role === 'viewer' ? 'viewer ' : '') + (connection && connection.address || 'unknown'), now = Date.now();
   let entry = failures.get(address);
   if (entry && entry.lockedUntil > now) return 'locked';
-  if (same(given, STAFF_KEY) || (role === 'reader' && same(given, READER_KEY)) || (role === 'viewer' && same(given, VIEWER_KEY))) { failures.delete(address); return true; }
+  // The presenter's screen (stage) only watches, so the reader's key opens it too.
+  if (same(given, STAFF_KEY) || ((role === 'reader' || role === 'stage') && same(given, READER_KEY)) || (role === 'viewer' && same(given, VIEWER_KEY))) { failures.delete(address); return true; }
   if (!entry) { entry = { times: [], lockedUntil: 0 }; failures.set(address, entry); }
   entry.times = entry.times.filter(function (time) { return now - time < FAILURE_WINDOW_MS; });
   entry.times.push(now);

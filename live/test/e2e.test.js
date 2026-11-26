@@ -314,6 +314,8 @@ const card = (socket, table, zone, value) => socket.send(JSON.stringify({ t: 'zo
   assert.deepStrictEqual(await signIn('host', READER_KEY), { t: 'denied', locked: false }, 'reader key refused for the host console');
   assert.strictEqual((await signIn('reader', READER_KEY)).t, 'welcome');
   assert.strictEqual((await signIn('reader', KEY)).t, 'welcome', 'the host key still opens the reader');
+  assert.strictEqual((await signIn('stage', READER_KEY)).t, 'welcome', 'the reader key opens the presenter screen');
+  assert.strictEqual((await signIn('stage', KEY)).t, 'welcome', 'so does the host key');
   const asViewer = key => new Promise((resolve, reject) => {
     const socket = new WebSocket('ws://localhost:' + PORT + '/ws');
     socket.on('open', () => { socket.send(JSON.stringify({ t: 'hello', role: 'viewer', key })); socket.send(JSON.stringify({ t: 'watch', table: 'duel' })); });

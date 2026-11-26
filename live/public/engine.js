@@ -7,7 +7,7 @@
 })(typeof self !== 'undefined' ? self : this, function (Games) {
   'use strict';
 
-  // options: staffKeyMatches(key, role, connection) -> true, false or 'locked' (role is host, reader or viewer);
+  // options: staffKeyMatches(key, role, connection) -> true, false or 'locked' (role is host, reader, stage or viewer);
   // viewerKey: the viewers' key, handed to the host so its QR code can carry it; newId() -> string;
   // bots: number of demo viewers; tableSettings: starting settings for every table;
   // audit(entry): called for every sign-in attempt and every action that changes a round.
@@ -95,6 +95,50 @@
       try { socket.deliver(message); } catch (error) { /* the connection is going away */ }
     }
 
+    // What the staff screens see about the picks. Names are shown masked, as a short tag tells two
+    // viewers with the same mask apart. Lists are capped: a burst of picks must not grow every message.
+    const DETAIL_ROWS = 50, FEED_ROWS = 30, NEAR_LIMIT = 0.8;
+    function maskName(name) {
+      const chars = Array.from(String(name || ''));
+      if (chars.length <= 1) return (chars[0] || '?') + '*';
+      if (chars.length === 2) return chars[0] + '*';
+      return chars[0] + '*'.repeat(Math.min(chars.length - 2, 3)) + chars[chars.length - 1];
+    }
+    function whoOf(viewerId) {
+      const viewer = viewers.get(viewerId);
+      return { who: maskName(viewer ? viewer.name : ''), tag: String(viewerId).replace(/^bot-/, 'b').slice(0, 4) };
+    }
+    function pickSummary(round) {
+      const spotPickers = {};
+      let roundTotal = 0;
+      if (round) round.picks.forEach(function (list) {
+        const seen = {};
+        list.forEach(function (pick) { roundTotal += pick.amount; if (!seen[pick.spot]) { seen[pick.spot] = true; spotPickers[pick.spot] = (spotPickers[pick.spot] || 0) + 1; } });
+      });
+      return { spotPickers: spotPickers, roundTotal: roundTotal };
+    }
+    function pickDetail(round) {
+      const players = [], feed = [];
+      if (round) round.picks.forEach(function (list, viewerId) {
+        const spots = {};
+        let total = 0;
+        list.forEach(function (pick) {
+          spots[pick.spot] = (spots[pick.spot] || 0) + pick.amount; total += pick.amount;
+          feed.push(Object.assign({ spot: pick.spot, amount: pick.amount, at: pick.at || 0 }, whoOf(viewerId)));
+        });
+        const near = Object.keys(spots).some(function (spot) { return spots[spot] >= SPOT_LIMIT * NEAR_LIMIT; });
+        players.push(Object.assign({ spots: spots, total: total, near: near }, whoOf(viewerId)));
+      });
+      players.sort(function (a, b) { return b.total - a.total; });
+      feed.sort(function (a, b) { return b.at - a.at; });
+      return { players: players.slice(0, DETAIL_ROWS), playerCount: players.length, feed: feed.slice(0, FEED_ROWS) };
+    }
+    function watchersOf(table) {
+      const ids = new Set();
+      connections.forEach(function (socket) { if (socket.role === 'viewer' && socket.watching === table.id) ids.add(socket.viewerId); });
+      return ids.size;
+    }
+
     function totalsOf(round) {
       const totals = {};
       if (!round) return totals;
@@ -117,7 +161,7 @@
         Object.keys(round.cards).forEach(function (zone) {
           const entry = round.cards[zone];
           cards[zone] = masked ? { card: null, back: true }
-            : role === 'viewer' ? { card: entry.card, source: entry.source, back: entry.back }
+            : role === 'viewer' || role === 'stage' ? { card: entry.card, source: entry.source, back: entry.back }
             : { card: entry.card, source: entry.source, back: entry.back, score: entry.score, margin: entry.margin, top: entry.top, shot: entry.shot, uncertain: entry.uncertain, conflict: entry.conflict };
         });
       }
@@ -138,7 +182,13 @@
         stale: ['idle', 'result', 'void'].indexOf(phase) >= 0 ? staleZones(table) : [],
         auto: table.settings.auto
       };
-      if (role !== 'viewer') {
+      // The presenter's screen and the host console also see how many chose each spot and the round's total.
+      if (role !== 'viewer') Object.assign(view, pickSummary(round));
+      if (role === 'staff') {
+        const detail = pickDetail(round);
+        view.players = detail.players; view.playerCount = detail.playerCount; view.feed = detail.feed;
+        view.watchers = watchersOf(table);
+        view.spotLimit = SPOT_LIMIT;
         view.settings = table.settings;
         view.history = table.history;
         view.readerInfo = table.readerInfo;
@@ -153,9 +203,10 @@
     function broadcastTable(table) {
       connections.forEach(function (socket) {
         if (!socket.role || socket.watching !== table.id) return;
-        send(socket, { t: 'table', table: tableView(table, socket.role === 'viewer' ? 'viewer' : 'staff') });
+        send(socket, { t: 'table', table: tableView(table, viewOf(socket)) });
       });
     }
+    function viewOf(socket) { return socket.role === 'viewer' || socket.role === 'stage' ? socket.role : 'staff'; }
 
     // Picks arrive in bursts (every viewer at once near the end of the countdown). Running totals are
     // sent at most every 250 ms instead of once per pick; phase changes still go out immediately.
@@ -360,7 +411,7 @@
         const onSpot = list.reduce(function (total, pick) { return total + (pick.spot === spot.id ? pick.amount : 0); }, 0);
         if (onSpot + amount > SPOT_LIMIT) return '這一格本回合最多 ' + SPOT_LIMIT + ' 點。';
         viewer.points -= amount;
-        list.push({ spot: spot.id, amount: amount });
+        list.push({ spot: spot.id, amount: amount, at: Date.now() });
         table.round.picks.set(viewer.id, list);
         sendMe(viewer.id);
         broadcastSoon(table);
@@ -445,7 +496,7 @@
         table.frame = { image: message.image, at: Date.now() };
         if (Date.now() - table.frameSentAt >= FRAME_INTERVAL_MS) {
           table.frameSentAt = Date.now();
-          connections.forEach(function (other) { if (other.role && other.role !== 'reader' && other.watching === table.id) send(other, { t: 'frame', table: table.id, image: table.frame.image, at: table.frame.at }); });
+          connections.forEach(function (other) { if (other.role && other.role !== 'reader' && other.role !== 'stage' && other.watching === table.id) send(other, { t: 'frame', table: table.id, image: table.frame.image, at: table.frame.at }); });
         }
         return null;
       }
@@ -531,7 +582,7 @@
     }
 
     function hello(socket, message) {
-      if (message.role === 'host' || message.role === 'reader') {
+      if (message.role === 'host' || message.role === 'reader' || message.role === 'stage') {
         const verdict = staffKeyMatches(message.key, message.role, socket);
         if (verdict !== true) {
           audit({ action: 'sign-in refused', role: message.role, locked: verdict === 'locked', by: socket.address });
@@ -578,13 +629,14 @@
         if (!table) problem = 'Unknown table.';
         else {
           socket.watching = table.id;
-          send(socket, { t: 'table', table: tableView(table, socket.role === 'viewer' ? 'viewer' : 'staff') });
-          if (table.frame && socket.role !== 'reader') send(socket, { t: 'frame', table: table.id, image: table.frame.image, at: table.frame.at });
+          send(socket, { t: 'table', table: tableView(table, viewOf(socket)) });
+          if (table.frame && socket.role !== 'reader' && socket.role !== 'stage') send(socket, { t: 'frame', table: table.id, image: table.frame.image, at: table.frame.at });
         }
       }
       else if (socket.role === 'viewer') problem = handleViewer(socket, message);
       else if (socket.role === 'host') problem = handleHost(socket, message);
       else if (socket.role === 'reader') problem = handleReader(socket, message);
+      else if (socket.role === 'stage') problem = 'This screen is read-only.';   // the presenter's screen only watches
       if (problem) send(socket, { t: 'error', text: problem, ref: message.ref || null });
     }
 

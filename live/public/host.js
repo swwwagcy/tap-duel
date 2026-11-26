@@ -247,9 +247,41 @@
   }
 
   function renderTotals() {
-    var table = state.table, current = game();
-    var rows = current.spots.map(function (spot) { return '<div class="row"><span>' + Live.escape(spot.label) + '</span><span class="num">' + (table.totals[spot.id] || 0).toLocaleString('zh-TW') + '</span></div>'; }).join('');
-    $('totals').innerHTML = '<div class="row muted"><span>本回合參與</span><span class="num">' + table.pickers + ' 人</span></div>' + rows;
+    var table = state.table, current = game(), people = table.spotPickers || {};
+    var rows = current.spots.map(function (spot) { return '<div class="row"><span>' + Live.escape(spot.label) + '<small>' + (people[spot.id] || 0) + ' 人</small></span><span class="num">' + number(table.totals[spot.id]) + '</span></div>'; }).join('');
+    $('totals').innerHTML = '<div class="row muted"><span>本回合參與</span><span class="num">' + table.pickers + ' 人</span></div>' + rows +
+      '<div class="row sum"><span>本回合合計</span><span class="num">' + number(table.roundTotal) + '</span></div>' +
+      '<div class="row muted"><span>正在看這一桌</span><span class="num">' + (table.watchers || 0) + ' 人</span></div>';
+    renderDetail();
+  }
+
+  // Every pick of the round: by viewer (largest total first, with the ones near the per-spot limit
+  // marked) or as a feed, newest first. Names arrive masked from the server.
+  var detailMode = Live.store.get('tdl-host-detail', 'people') === 'feed' ? 'feed' : 'people';
+  $('detail').querySelectorAll('[data-mode]').forEach(function (button) {
+    button.addEventListener('click', function () { detailMode = button.dataset.mode; Live.store.set('tdl-host-detail', detailMode); renderDetail(); });
+  });
+  function number(value) { return (value || 0).toLocaleString('zh-TW'); }
+  function spotName(id) { var spot = game().spots.filter(function (item) { return item.id === id; })[0]; return spot ? spot.label : id; }
+  function renderDetail() {
+    var table = state.table;
+    $('detail').querySelectorAll('[data-mode]').forEach(function (button) { button.classList.toggle('on', button.dataset.mode === detailMode); });
+    if (!table) return;
+    var who = function (row) { return Live.escape(row.who) + '<small>' + Live.escape(row.tag) + '</small>'; };
+    var html;
+    if (detailMode === 'feed') {
+      html = (table.feed || []).map(function (pick) {
+        var time = pick.at ? new Date(pick.at).toTimeString().slice(3, 8) : '';
+        return '<div class="r"><span class="who"><span class="time">' + time + '</span>' + who(pick) + '</span><b class="num">+' + number(pick.amount) + '</b><span class="what">' + Live.escape(spotName(pick.spot)) + '</span></div>';
+      }).join('');
+    } else {
+      html = (table.players || []).map(function (row) {
+        var spots = Object.keys(row.spots).map(function (id) { return Live.escape(spotName(id)) + ' ' + number(row.spots[id]); }).join('・');
+        return '<div class="r' + (row.near ? ' near' : '') + '"><span class="who">' + who(row) + '</span><b class="num">' + number(row.total) + '</b><span class="what">' + spots + '</span></div>';
+      }).join('');
+      if ((table.playerCount || 0) > (table.players || []).length) html += '<p class="empty">另有 ' + (table.playerCount - table.players.length) + ' 人未列出</p>';
+    }
+    $('detailList').innerHTML = html || '<p class="empty">' + (table.phase === 'open' ? '還沒有人選擇。' : '這一回合沒有選擇。') + '</p>';
   }
 
   function renderButtons() {

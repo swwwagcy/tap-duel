@@ -97,6 +97,22 @@ async function playRound(page, table, spot) {
     assert.ok(await host.evaluate(() => !!document.querySelector('.demotag')), 'demo tag shown on standalone pages');
     step('standalone tabs share one table through the shared worker');
 
+    // The presenter's screen, in a third tab: the same round, the room's choices as they come in,
+    // and nothing it can press.
+    {
+      const stage = await context.newPage();
+      stage.on('pageerror', error => errors.push(error.message));
+      await stage.goto(base + '/stage.html?demo');
+      await until(() => stage.evaluate(() => document.getElementById('clock').dataset.phase === 'open'), 'stage sees the open round');
+      await viewer.click('.chip[data-chip="100"]'); await viewer.click('.spot[data-spot="U"]');
+      await until(() => stage.evaluate(() => Number(document.querySelector('.spot[data-spot="U"] .amount').textContent.replace(/,/g, '')) >= 100), 'stage shows the pick in its spot total');
+      assert.ok(await stage.evaluate(() => /\d+ 人/.test(document.querySelector('.spot[data-spot="U"] .people').textContent)), 'people per spot shown');
+      assert.strictEqual(await stage.evaluate(() => document.querySelectorAll('.stage button:not(.tabs button)').length), 0, 'the presenter screen has nothing to press');
+      await until(() => host.evaluate(() => /\+100/.test(document.getElementById('detailList').textContent) || /藍方 \d/.test(document.getElementById('detailList').textContent)), 'host lists the pick in its detail');
+      await stage.close();
+      step('presenter screen shows totals and people per spot; host lists every pick');
+    }
+
     // The half sheet inside a mock live room: 390 x 347, no video of its own, and never ahead of
     // the stream: no card faces while dealing, the result only after the stream delay.
     {
