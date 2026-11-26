@@ -109,6 +109,11 @@ async function playRound(page, table, spot) {
       assert.ok(await stage.evaluate(() => /\d+ 人/.test(document.querySelector('.spot[data-spot="U"] .people').textContent)), 'people per spot shown');
       assert.strictEqual(await stage.evaluate(() => document.querySelectorAll('.stage button:not(.tabs button)').length), 0, 'the presenter screen has nothing to press');
       await until(() => host.evaluate(() => /\+100/.test(document.getElementById('detailList').textContent) || /藍方 \d/.test(document.getElementById('detailList').textContent)), 'host lists the pick in its detail');
+      // The viewer page shows how the room's points split and keeps the results as a six-row grid.
+      await until(() => viewer.evaluate(() => document.querySelectorAll('#share .sharebar span').length >= 1), 'viewer page shows the share bar');
+      assert.ok(await viewer.evaluate(() => /%/.test(document.querySelector('.spot[data-spot="U"] .all').textContent)), 'the spot shows its share');
+      assert.strictEqual(await viewer.evaluate(() => document.querySelectorAll('#road .bead span').length % 6), 0, 'results grid has whole columns of six');
+      assert.ok(await viewer.evaluate(() => /近 \d+ 回合/.test(document.getElementById('roadStats').textContent)), 'counts per side shown');
       await stage.close();
       step('presenter screen shows totals and people per spot; host lists every pick');
     }

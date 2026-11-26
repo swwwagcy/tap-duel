@@ -158,6 +158,41 @@
     Live.askStaffKey(function () { if (after) after(); else link.reopen(); }, message.locked ? 'locked' : Live.store.get(keySlot(), '') || Live.store.get('tdl-staff-key', '') ? true : false);
   };
 
+  /* Results so far, as viewers of this kind of table expect to read them: a bead road (six to a
+     column, oldest at the top left), counts per side, and how the room's points split this round. */
+  Live.sideOf = function (code) { return code === 'R' || code === 'red' ? 'red' : code === 'U' || code === 'blue' ? 'blue' : 'tie'; };
+  var SIDE_WORD = { red: '紅', blue: '藍', tie: '平' };
+  Live.roadStats = function (road) {
+    var stats = { red: 0, blue: 0, tie: 0, total: (road || []).length };
+    (road || []).forEach(function (code) { stats[Live.sideOf(code)]++; });
+    return stats;
+  };
+  Live.roadStatsHtml = function (road) {
+    var stats = Live.roadStats(road);
+    return '<span class="roadstats">近 ' + stats.total + ' 回合 <b class="red">紅 ' + stats.red + '</b><b class="blue">藍 ' + stats.blue + '</b><b class="tie">平 ' + stats.tie + '</b></span>';
+  };
+  // maxColumns keeps the newest columns; a column is never split, so results stay in their rows.
+  Live.beadRoadHtml = function (road, maxColumns) {
+    var list = road || [], rows = 6, columns = Math.ceil(list.length / rows);
+    var shown = list.slice(Math.max(0, columns - (maxColumns || columns)) * rows);
+    var cells = shown.map(function (code) { var side = Live.sideOf(code); return '<span class="' + side + '">' + SIDE_WORD[side] + '</span>'; }).join('');
+    var blanks = Math.max(maxColumns || 0, Math.ceil(shown.length / rows) || 1) * rows - shown.length;
+    for (var index = 0; index < blanks; index++) cells += '<span class="blank"></span>';
+    return '<div class="bead">' + cells + '</div>';
+  };
+  // The three main spots' share of the room's points this round (side bets are left out).
+  Live.shareOf = function (game, totals) {
+    var main = game.spots.slice(0, 3), sum = main.reduce(function (total, spot) { return total + (totals[spot.id] || 0); }, 0);
+    return main.map(function (spot) { return { id: spot.id, side: spot.side, label: spot.label, percent: sum ? Math.round((totals[spot.id] || 0) * 100 / sum) : 0, amount: totals[spot.id] || 0 }; });
+  };
+  Live.shareBarHtml = function (game, totals) {
+    var parts = Live.shareOf(game, totals), any = parts.some(function (part) { return part.amount > 0; });
+    if (!any) return '<div class="sharebar empty" aria-label="全場還沒有人選擇"></div>';
+    return '<div class="sharebar" aria-label="全場點數比例">' + parts.map(function (part) {
+      return part.amount ? '<span class="' + part.side + '" style="flex:' + part.amount + '">' + (part.percent >= 12 ? part.percent + '%' : '') + '</span>' : '';
+    }).join('') + '</div>';
+  };
+
   var toastTimer = null;
   Live.toast = function (text, level) {
     var box = Live.$('toast');

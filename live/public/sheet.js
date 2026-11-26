@@ -109,11 +109,14 @@
     var phase = table.phase;
     $('stage').dataset.phase = phase;
     $('round').textContent = table.roundNo || '—';
-    var open = phase === 'open';
+    var open = phase === 'open', share = {};
+    Live.shareOf(current, table.totals).forEach(function (part) { share[part.id] = part; });
+    $('share').innerHTML = Live.shareBarHtml(current, table.totals);
     $('spots').querySelectorAll('.spot').forEach(function (button) {
       button.disabled = !open;
       var total = table.totals[button.dataset.spot];
-      button.querySelector('.all').textContent = total ? '全場 ' + number(total) : '';
+      var part = share[button.dataset.spot];
+      button.querySelector('.all').textContent = total ? '全場 ' + number(total) + (part ? '・' + part.percent + '%' : '') : '';
       button.classList.toggle('won', phase === 'result' && spotWon(button.dataset.spot));
     });
     var faces = 0;
@@ -137,7 +140,10 @@
       hand.classList.toggle('win', phase === 'result' && ((side === 'red' && (winner === 'R' || winner === 'red')) || (side === 'blue' && (winner === 'U' || winner === 'blue'))));
     });
     $('watch').hidden = !(phase === 'dealing' && !faces);
-    var road = table.road.slice(-16);
+    $('roadStats').innerHTML = Live.roadStatsHtml(table.road);
+    $('roadStatsFull').innerHTML = Live.roadStatsHtml(table.road);
+    $('roadFull').innerHTML = Live.beadRoadHtml(table.road, 10);
+    var road = table.road.slice(-10);
     $('road').innerHTML = road.length ? road.map(function (code) { return '<span class="' + code + '">' + (code === 'R' || code === 'red' ? '紅' : code === 'U' || code === 'blue' ? '藍' : '平') + '</span>'; }).join('') : '<span class="none">還沒有結果</span>';
     renderMe();
     tick();
@@ -167,6 +173,8 @@
   $('refill').addEventListener('click', function () { link.send({ t: 'refill' }); });
   $('helpButton').addEventListener('click', function () { $('help').hidden = false; });
   $('helpClose').addEventListener('click', function () { $('help').hidden = true; });
+  $('roadOpen').addEventListener('click', function () { $('roadPanel').hidden = false; });
+  $('roadClose').addEventListener('click', function () { $('roadPanel').hidden = true; });
 
   var offline = null;
   function offlineBanner(show) {

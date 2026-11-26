@@ -116,11 +116,13 @@
     $('phase').dataset.phase = table.phase;
     $('phase').textContent = Live.PHASE[table.phase] || table.phase;
     $('round').textContent = table.roundNo ? '回合 ' + table.roundNo : '';
-    var open = table.phase === 'open';
+    var open = table.phase === 'open', share = {};
+    Live.shareOf(current, table.totals).forEach(function (part) { share[part.id] = part; });
     $('spots').querySelectorAll('.spot').forEach(function (button) {
       button.disabled = !open;
       var total = table.totals[button.dataset.spot];
-      button.querySelector('.all').textContent = total ? '全場 ' + total.toLocaleString('zh-TW') : '';
+      var part = share[button.dataset.spot];
+      button.querySelector('.all').textContent = total ? '全場 ' + total.toLocaleString('zh-TW') + (part ? '・' + part.percent + '%' : '') : '';
       button.classList.toggle('won', table.phase === 'result' && spotWon(button.dataset.spot));
     });
     current.zones.forEach(function (zone) {
@@ -141,7 +143,9 @@
       var winner = outcome && outcome.winner;
       hand.classList.toggle('win', table.phase === 'result' && ((side === 'red' && (winner === 'R' || winner === 'red')) || (side === 'blue' && (winner === 'U' || winner === 'blue'))));
     });
-    $('road').innerHTML = table.road.length ? table.road.map(function (code) { return '<span class="' + code + '">' + (code === 'R' ? '紅' : code === 'U' ? '藍' : '平') + '</span>'; }).join('') : '<span class="muted" style="width:auto;color:var(--muted);font-weight:400">還沒有結果</span>';
+    $('road').innerHTML = Live.beadRoadHtml(table.road, 10);
+    $('roadStats').innerHTML = Live.roadStatsHtml(table.road);
+    $('share').innerHTML = Live.shareBarHtml(current, table.totals);
     if (table.phase === 'void') $('banner').innerHTML = '';
     renderBanner();
     renderMe();
