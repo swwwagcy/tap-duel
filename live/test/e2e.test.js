@@ -41,7 +41,7 @@ const clear = (socket, table, zones) => zones.forEach(zone => socket.send(JSON.s
 const card = (socket, table, zone, value) => socket.send(JSON.stringify({ t: 'zone', table, zone, state: 'card', card: value, score: 0.95, margin: 0.8, top: [{ card: value, score: 0.95 }] }));
 
 (async () => {
-  server = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], { env: Object.assign({}, process.env, { PORT: String(PORT), STAFF_KEY: KEY, READER_KEY: READER_KEY, VIEWER_KEY: VIEWER_KEY }), stdio: ['ignore', 'pipe', 'inherit'] });
+  server = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], { env: Object.assign({}, process.env, { PORT: String(PORT), STAFF_KEY: KEY, READER_KEY: READER_KEY, VIEWER_KEY: VIEWER_KEY, TABLES_START_OPEN: '1' }), stdio: ['ignore', 'pipe', 'inherit'] });
   await until(async () => { try { return (await fetch(BASE + '/health')).ok; } catch (error) { return false; } }, 'server start');
   step('server started');
 
@@ -298,6 +298,53 @@ const card = (socket, table, zone, value) => socket.send(JSON.stringify({ t: 'zo
     assert.strictEqual(await host.evaluate(() => document.getElementById('viewerUrl').textContent.split('（')[0]), BASE + '/play.html');
     await host.click('#closeDrawer');
     step('test log: ' + summary + ' CSV downloads; QR code decodes to ' + found.data);
+  }
+
+  /* Signing in with a code: the codes page makes a ticket, the on-site page opens with it and
+     needs no key; a presenter's code opens only the presenter's screen. */
+  {
+    const admin = await (await browser.newContext({ viewport: { width: 900, height: 900 } })).newPage();
+    admin.on('pageerror', error => errors.push(error.message));
+    await admin.goto(BASE + '/admin.html#key=' + KEY);
+    await admin.click('#makeHost');
+    await admin.waitForSelector('#hostCode .link');
+    const hostLink = await admin.evaluate(() => document.querySelector('#hostCode .link').textContent);
+    assert.ok(/\/table\.html#ticket=[A-Za-z0-9]{16,}$/.test(hostLink), 'the code is a link to the on-site page: ' + hostLink);
+    await admin.click('#makeStage');
+    await until(() => admin.evaluate(() => /請先填/.test(document.getElementById('toast').textContent)), 'presenter code needs a name');
+    await admin.fill('#stagePresenter', '小美'); await admin.click('#makeStage');
+    await admin.waitForSelector('#stageCode .link');
+    const stageLink = await admin.evaluate(() => document.querySelector('#stageCode .link').textContent);
+
+    const onSite = await (await browser.newContext({ viewport: { width: 1280, height: 800 } })).newPage();   // a device that has never seen a key
+    onSite.on('pageerror', error => errors.push(error.message));
+    await onSite.goto(hostLink);
+    await onSite.waitForSelector('#games button[data-table="duel"]');
+    assert.strictEqual(await onSite.evaluate(() => location.hash), '', 'the code is taken out of the address');
+    assert.ok(await onSite.evaluate(() => /^"session:/.test(localStorage.getItem('tdl-staff-key'))), 'the device keeps a session, not the code');
+    await onSite.click('#games button[data-table="duel"]');
+    const inside = (page, name) => page.frames().find(item => new RegExp(name + '\\.html').test(item.url()));
+    await until(() => !!inside(onSite, 'host') && !!inside(onSite, 'stage') && !!inside(onSite, 'reader'), 'on-site page: three views');
+    await until(() => inside(onSite, 'host').evaluate(() => !!document.querySelector('.zone') && !document.querySelector('.keygate')), 'host console signed in by the session');
+    await until(() => inside(onSite, 'stage').evaluate(() => document.querySelectorAll('.spot').length > 0 && !document.querySelector('.keygate')), 'presenter screen signed in by the session');
+    // The same code a second time is refused.
+    const second = await (await browser.newContext()).newPage();
+    await second.goto(hostLink);
+    await second.waitForSelector('.keygate');
+    assert.ok(await second.evaluate(() => /失效/.test(document.getElementById('pickTitle').textContent)), 'a used code says it has run out');
+    await second.context().close();
+
+    const presenter = await (await browser.newContext({ viewport: { width: 1280, height: 800 } })).newPage();
+    presenter.on('pageerror', error => errors.push(error.message));
+    await presenter.goto(stageLink);
+    await presenter.waitForSelector('#games button[data-table="duel"]');
+    await presenter.click('#games button[data-table="duel"]');
+    await until(() => !!inside(presenter, 'stage'), 'presenter: presenter screen loaded');
+    assert.ok(!inside(presenter, 'host') && !inside(presenter, 'reader'), 'a presenter code opens neither the host console nor the reader');
+    assert.strictEqual(await presenter.evaluate(() => document.querySelectorAll('#viewTabs button').length), 0);
+    await until(() => onSite.evaluate(() => /主持人 小美/.test(document.getElementById('where').textContent)), 'the table shows who presents it');
+    for (const page of [admin, onSite, presenter]) await page.context().close();
+    step('sign-in codes: host code opens all three views without a key, works once; presenter code opens only the presenter screen and names the presenter');
   }
 
   /* Security: headers on every file, the reader key does not open the host console, and wrong

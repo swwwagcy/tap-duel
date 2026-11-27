@@ -68,7 +68,7 @@ check('checkComplete catches missing, extra and duplicate cards', () => {
 const Engine = require('../public/engine.js');
 let viewerKey = null;   // null: the viewer pages are open
 function withEngine(fn) {
-  const engine = Engine.createEngine({ staffKeyMatches: (key, role) => role === 'viewer' ? viewerKey === null || key === viewerKey : key === 'k' });
+  const engine = Engine.createEngine({ tablesStartOpen: true, staffKeyMatches: (key, role) => role === 'viewer' ? viewerKey === null || key === viewerKey : key === 'k' });
   const open = () => { const got = []; const connection = { deliver: (message) => got.push(message) }; engine.connect(connection); return { connection, got, say: (message) => engine.receive(connection, JSON.stringify(message)) }; };
   try { fn(engine, open); } finally { engine.stop(); }
 }
@@ -146,6 +146,77 @@ check('the presenter screen watches only; like the host it sees totals, people p
   assert.strictEqual(host.got.find((message) => message.t === 'table').table.players[0].near, true);
 }));
 
+check('a table is opened before its first round; closing it cancels a running round and returns the points', () => {
+  const engine = Engine.createEngine({ staffKeyMatches: (key, role) => role === 'viewer' || key === 'k' });
+  try {
+    const open = () => { const got = []; const connection = { deliver: (message) => got.push(message) }; engine.connect(connection); return { connection, got, say: (message) => engine.receive(connection, JSON.stringify(message)) }; };
+    const host = open(); host.say({ t: 'hello', role: 'host', key: 'k' }); host.say({ t: 'watch', table: 'duel' });
+    const viewer = open(); viewer.say({ t: 'hello', role: 'viewer', viewerId: 'one' }); viewer.say({ t: 'watch', table: 'duel' });
+    const last = (who) => who.got.filter((message) => message.t === 'table').pop().table;
+    assert.strictEqual(last(viewer).tableOpen, false, 'viewers are told the table is closed');
+    host.say({ t: 'open', table: 'duel' });
+    assert.strictEqual(engine.tables.duel.phase, 'idle', 'no round on a closed table');
+    assert.ok(host.got.some((message) => message.t === 'error'));
+    host.say({ t: 'tableOpen', table: 'duel', presenter: '小美<b>' });
+    assert.strictEqual(last(viewer).tableOpen, true);
+    assert.strictEqual(last(viewer).presenter, '小美b', 'the presenter name is cleaned and shown');
+    host.say({ t: 'open', table: 'duel' });
+    viewer.say({ t: 'pick', table: 'duel', spot: 'R', amount: 500 });
+    assert.strictEqual(engine.tables.duel.phase, 'open');
+    host.say({ t: 'tableClose', table: 'duel' });
+    assert.strictEqual(engine.tables.duel.phase, 'void', 'the running round is cancelled');
+    assert.strictEqual(viewer.got.filter((message) => message.t === 'me').pop().points, 10000, 'and the points come back');
+    assert.strictEqual(last(viewer).tableOpen, false);
+    host.say({ t: 'open', table: 'duel' });
+    assert.strictEqual(engine.tables.duel.phase, 'void', 'closed again: no new round');
+    viewer.say({ t: 'tableOpen', table: 'duel' });
+    assert.strictEqual(engine.tables.duel.isOpen, false, 'a viewer cannot open a table');
+  } finally { engine.stop(); }
+});
+
+check('a ticket signs in once and becomes a session; a presenter ticket opens only the presenter screen', () => {
+  const trail = [];
+  const engine = Engine.createEngine({ staffKeyMatches: (key, role) => role === 'viewer' || key === 'k', audit: (entry) => trail.push(entry) });
+  try {
+    const open = () => { const got = []; const connection = { deliver: (message) => got.push(message) }; engine.connect(connection); return { connection, got, say: (message) => engine.receive(connection, JSON.stringify(message)) }; };
+    const admin = open(); admin.say({ t: 'hello', role: 'host', key: 'k' });
+    admin.say({ t: 'ticket', role: 'host' }); admin.say({ t: 'ticket', role: 'stage', presenter: '小美' });
+    const [hostTicket, stageTicket] = admin.got.filter((message) => message.t === 'ticket');
+    assert.ok(hostTicket.code.length >= 16 && hostTicket.code !== stageTicket.code);
+    // Only a signed-in host can make one.
+    const viewer = open(); viewer.say({ t: 'hello', role: 'viewer' }); viewer.say({ t: 'ticket', role: 'host' });
+    assert.ok(!viewer.got.some((message) => message.t === 'ticket'));
+    const stranger = open(); stranger.say({ t: 'ticket', role: 'host' });
+    assert.ok(!stranger.got.some((message) => message.t === 'ticket'));
+
+    const first = open(); first.say({ t: 'hello', role: 'host', any: true, key: 'ticket:' + hostTicket.code });
+    assert.strictEqual(first.got[0].t, 'welcome'); assert.strictEqual(first.got[0].role, 'host');
+    const session = first.got[0].session; assert.ok(session && session !== hostTicket.code);
+    const again = open(); again.say({ t: 'hello', role: 'host', key: 'ticket:' + hostTicket.code });
+    assert.strictEqual(again.got[0].t, 'denied', 'a ticket works once');
+    // The session opens the host console, the reader and the presenter screen.
+    ['host', 'reader', 'stage'].forEach((role) => { const who = open(); who.say({ t: 'hello', role, key: 'session:' + session }); assert.strictEqual(who.got[0].role, role); assert.ok(!who.got[0].session, 'the session is not handed out again'); });
+    const wrong = open(); wrong.say({ t: 'hello', role: 'host', key: 'session:nope' });
+    assert.strictEqual(wrong.got[0].t, 'denied');
+
+    // A presenter's ticket: asked for the host console, it gets the presenter screen and nothing more.
+    const presenter = open(); presenter.say({ t: 'hello', role: 'host', any: true, key: 'ticket:' + stageTicket.code });
+    assert.strictEqual(presenter.got[0].role, 'stage');
+    const stageSession = presenter.got[0].session;
+    const sneaky = open(); sneaky.say({ t: 'hello', role: 'host', key: 'session:' + stageSession });
+    assert.strictEqual(sneaky.got[0].t, 'denied', 'a presenter session does not open the host console');
+    const reads = open(); reads.say({ t: 'hello', role: 'reader', key: 'session:' + stageSession });
+    assert.strictEqual(reads.got[0].t, 'denied');
+    presenter.say({ t: 'tableOpen', table: 'duel' }); presenter.say({ t: 'ticket', role: 'host' });
+    assert.strictEqual(engine.tables.duel.isOpen, false);
+    assert.ok(!presenter.got.some((message) => message.t === 'ticket'), 'and cannot make tickets');
+    presenter.say({ t: 'watch', table: 'duel' });
+    assert.strictEqual(engine.tables.duel.presenter, '小美', 'the presenter of the table is whoever signed in with the presenter ticket');
+    assert.ok(trail.some((entry) => entry.action === 'ticket') && trail.some((entry) => entry.action === 'sign-in' && entry.with === 'ticket'));
+    assert.ok(!JSON.stringify(trail).includes(session), 'the audit trail does not carry sessions');
+  } finally { engine.stop(); }
+});
+
 check('a reader cannot plant markup in a picture, and odd pictures are dropped', () => withEngine((engine, open) => {
   const host = open(); host.say({ t: 'hello', role: 'host', key: 'k' }); host.say({ t: 'watch', table: 'duel' });
   const reader = open(); reader.say({ t: 'hello', role: 'reader', key: 'k' });
@@ -168,7 +239,7 @@ check('a reader cannot plant markup in a picture, and odd pictures are dropped',
 }));
 
 check('demo viewers cannot be impersonated, and remembered viewers have a limit', () => {
-  const engine = Engine.createEngine({ bots: 2, viewerLimit: 6 });
+  const engine = Engine.createEngine({ tablesStartOpen: true, bots: 2, viewerLimit: 6 });
   try {
     const open = () => { const got = []; const connection = { deliver: (message) => got.push(message) }; engine.connect(connection); return { connection, got, say: (message) => engine.receive(connection, JSON.stringify(message)) }; };
     const thief = open(); thief.say({ t: 'hello', role: 'viewer', viewerId: 'bot-0' });
@@ -182,7 +253,7 @@ check('demo viewers cannot be impersonated, and remembered viewers have a limit'
 
 check('sign-ins and round actions are written to the audit trail, a locked sign-in says so', () => {
   const trail = [];
-  const engine = Engine.createEngine({ staffKeyMatches: (key, role) => key === 'locked-out' ? 'locked' : role === 'viewer' || key === 'k' || (role === 'reader' && key === 'r'), audit: (entry) => trail.push(entry) });
+  const engine = Engine.createEngine({ tablesStartOpen: true, staffKeyMatches: (key, role) => key === 'locked-out' ? 'locked' : role === 'viewer' || key === 'k' || (role === 'reader' && key === 'r'), audit: (entry) => trail.push(entry) });
   try {
     const open = () => { const got = []; const connection = { address: '203.0.113.9', deliver: (message) => got.push(message) }; engine.connect(connection); return { got, say: (message) => engine.receive(connection, JSON.stringify(message)) }; };
     const wrong = open(); wrong.say({ t: 'hello', role: 'host', key: 'nope' });
@@ -253,7 +324,7 @@ check('with a viewers key set, a viewer without it gets nothing; the host is han
       assert.ok(viewer.got.some((message) => message.t === 'table'));
       assert.strictEqual(viewer.got[0].viewerKey, undefined, 'a viewer is not told the key');
     });
-    const engine = Engine.createEngine({ staffKeyMatches: () => true, viewerKey: 'v' });
+    const engine = Engine.createEngine({ tablesStartOpen: true, staffKeyMatches: () => true, viewerKey: 'v' });
     try {
       const got = []; const connection = { deliver: (message) => got.push(message) }; engine.connect(connection);
       engine.receive(connection, JSON.stringify({ t: 'hello', role: 'host', key: 'k' }));
@@ -266,7 +337,7 @@ check('with a viewers key set, a viewer without it gets nothing; the host is han
 });
 
 const delayed = (async () => {
-  const engine = Engine.createEngine({ staffKeyMatches: (key, role) => role === 'viewer' || key === 'k', tableSettings: { streamDelay: 0.4 } });
+  const engine = Engine.createEngine({ tablesStartOpen: true, staffKeyMatches: (key, role) => role === 'viewer' || key === 'k', tableSettings: { streamDelay: 0.4 } });
   try {
     const open = () => { const got = []; const connection = { deliver: (message) => got.push(JSON.parse(JSON.stringify(message))) }; engine.connect(connection); return { got, say: (message) => engine.receive(connection, JSON.stringify(message)) }; };
     const last = (who) => who.got.filter((message) => message.t === 'table').pop().table;

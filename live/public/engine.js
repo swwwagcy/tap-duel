@@ -10,6 +10,7 @@
   // options: staffKeyMatches(key, role, connection) -> true, false or 'locked' (role is host, reader, stage or viewer);
   // viewerKey: the viewers' key, handed to the host so its QR code can carry it; newId() -> string;
   // bots: number of demo viewers; tableSettings: starting settings for every table;
+  // tablesStartOpen: tables are open from the start (otherwise a host opens each one first);
   // audit(entry): called for every sign-in attempt and every action that changes a round.
   function createEngine(options) {
     options = options || {};
@@ -55,9 +56,26 @@
         frameSentAt: 0,
         readerSeenAt: 0,
         readerInfo: null,
-        seen: {}              // zone -> what the reader last saw there, in any phase
+        seen: {},             // zone -> what the reader last saw there, in any phase
+        // A table is opened before its first round and closed when the session ends; rounds can only
+        // start while it is open. presenter: who is dealing at it (shown to staff and viewers).
+        isOpen: !!options.tablesStartOpen,
+        presenter: ''
       };
     });
+    // Signing in without typing a key: a signed-in host makes a ticket (shown as a QR code); whoever
+    // opens it first swaps it for a session. A 'host' session may also read cards and show the
+    // presenter's screen; a 'stage' session only shows the presenter's screen.
+    const TICKET_MS = 10 * 60 * 1000, SESSION_MS = 12 * 60 * 60 * 1000, TICKET_LIMIT = 200, SESSION_LIMIT = 500;
+    const tickets = new Map();           // code -> { role, presenter, expires }
+    const sessions = new Map();          // token -> { role, presenter, expires }
+    function token() { return (newId() + newId()).replace(/[^a-zA-Z0-9]/g, ''); }
+    function prune(map, limit) {
+      const now = Date.now();
+      map.forEach(function (entry, key) { if (entry.expires < now) map.delete(key); });
+      while (map.size >= limit) map.delete(map.keys().next().value);
+    }
+    function sessionAllows(session, role) { return session.role === 'host' || role === 'stage'; }
     const viewers = new Map();           // viewerId -> { id, name, points }
     const connections = new Set();       // every open connection: { deliver(message), role, watching, viewerId }
 
@@ -179,6 +197,8 @@
         road: pending && table.phase === 'result' ? table.road.slice(0, -1) : table.road,
         totals: totalsOf(round),
         pickers: round ? round.picks.size : 0,
+        tableOpen: table.isOpen,
+        presenter: table.presenter,
         readerOnline: Date.now() - table.readerSeenAt < READER_TIMEOUT_MS,
         stale: ['idle', 'result', 'void'].indexOf(phase) >= 0 ? staleZones(table) : [],
         auto: table.settings.auto
@@ -257,6 +277,7 @@
     }
 
     function openRound(table, force) {
+      if (!table.isOpen) return '這張桌還沒開桌。';
       if (['idle', 'result', 'void'].indexOf(table.phase) < 0) return '這一回合還沒結束。';
       if (Date.now() < table.revealAt) return '觀眾端還沒看到上一回合的結果，請再等 ' + Math.ceil((table.revealAt - Date.now()) / 1000) + ' 秒。';
       const stale = staleZones(table);
@@ -383,7 +404,7 @@
           if (table.round) table.round.dealingAt = now;
           table.endsAt = 0;
           broadcastTable(table);
-        } else if ((table.phase === 'result' || table.phase === 'void') && table.settings.auto && now >= table.endsAt && !staleZones(table).length) {
+        } else if ((table.phase === 'result' || table.phase === 'void') && table.isOpen && table.settings.auto && now >= table.endsAt && !staleZones(table).length) {
           openRound(table);   // waits for the table to be cleared
         }
       });
@@ -448,8 +469,41 @@
     }
 
     function handleHost(socket, message) {
+      if (message.t === 'ticket') {
+        const role = message.role === 'stage' ? 'stage' : 'host';
+        prune(tickets, TICKET_LIMIT);
+        const code = token(), expires = Date.now() + TICKET_MS;
+        tickets.set(code, { role: role, presenter: cleanName(message.presenter), expires: expires });
+        audit({ action: 'ticket', role: role, presenter: cleanName(message.presenter) || null, by: socket.address });
+        send(socket, { t: 'ticket', code: code, role: role, presenter: cleanName(message.presenter), expiresAt: expires });
+        return null;
+      }
       const table = tableOf(message.table);
       if (!table) return 'Unknown table.';
+      if (message.t === 'tableOpen') {
+        if (table.isOpen) return null;
+        table.isOpen = true;
+        if (cleanName(message.presenter)) table.presenter = cleanName(message.presenter);
+        else if (socket.presenter && !table.presenter) table.presenter = socket.presenter;
+        audit({ action: 'table open', table: table.id, presenter: table.presenter || null, by: socket.address });
+        broadcastTable(table);
+        return null;
+      }
+      if (message.t === 'tableClose') {
+        if (!table.isOpen) return null;
+        // A round still running when the table closes is cancelled and everything returned.
+        if (['open', 'closed', 'dealing'].indexOf(table.phase) >= 0) voidRound(table);
+        table.isOpen = false;
+        audit({ action: 'table close', table: table.id, by: socket.address });
+        broadcastTable(table);
+        return null;
+      }
+      if (message.t === 'presenter') {
+        table.presenter = cleanName(message.name);
+        audit({ action: 'presenter', table: table.id, presenter: table.presenter || null, by: socket.address });
+        broadcastTable(table);
+        return null;
+      }
       if (message.t === 'log') { send(socket, { t: 'log', table: table.id, rounds: table.log }); return null; }
       if (message.t === 'open') { const refused = openRound(table, !!message.force); if (!refused) audit({ action: 'open', table: table.id, round: table.round.no, forced: !!message.force, by: socket.address }); return refused; }
       if (message.t === 'void') { const roundNo = table.round && table.round.no, refused = voidRound(table); if (!refused) audit({ action: 'void', table: table.id, round: roundNo, by: socket.address }); return refused; }
@@ -587,6 +641,41 @@
 
     function hello(socket, message) {
       if (message.role === 'host' || message.role === 'reader' || message.role === 'stage') {
+        const given = typeof message.key === 'string' ? message.key : '';
+        if (/^(ticket|session):/.test(given)) {
+          // A ticket is used once and becomes a session; a session is what the device keeps.
+          const isTicket = given.slice(0, 7) === 'ticket:', code = given.slice(isTicket ? 7 : 8);
+          let session = null, sessionToken = null;
+          if (isTicket) {
+            const ticket = tickets.get(code);
+            tickets.delete(code);
+            if (ticket && ticket.expires > Date.now()) {
+              prune(sessions, SESSION_LIMIT);
+              sessionToken = token();
+              session = { role: ticket.role, presenter: ticket.presenter, expires: Date.now() + SESSION_MS };
+              sessions.set(sessionToken, session);
+            }
+          } else {
+            session = sessions.get(code) || null;
+            if (session && session.expires <= Date.now()) { sessions.delete(code); session = null; }
+            sessionToken = code;
+          }
+          // `any`: take whatever the session allows (a presenter's session asked for the host console gets the presenter's screen).
+          const role = session && (sessionAllows(session, message.role) ? message.role : message.any ? session.role : null);
+          if (!role) {
+            audit({ action: 'sign-in refused', role: message.role, by: socket.address, with: isTicket ? 'ticket' : 'session' });
+            send(socket, { t: 'denied', locked: false, expired: true });
+            return null;
+          }
+          audit({ action: 'sign-in', role: role, by: socket.address, with: isTicket ? 'ticket' : 'session' });
+          socket.role = role;
+          socket.presenter = session.presenter || '';
+          const greeting = { t: 'welcome', role: role, serverNow: Date.now(), tables: Object.keys(tables), sessionRole: session.role, presenter: socket.presenter };
+          if (isTicket) greeting.session = sessionToken;
+          if (role === 'host' && options.viewerKey) greeting.viewerKey = options.viewerKey;
+          send(socket, greeting);
+          return null;
+        }
         const verdict = staffKeyMatches(message.key, message.role, socket);
         if (verdict !== true) {
           audit({ action: 'sign-in refused', role: message.role, locked: verdict === 'locked', by: socket.address });
@@ -633,6 +722,8 @@
         if (!table) problem = 'Unknown table.';
         else {
           socket.watching = table.id;
+          // A presenter who signed in with their own ticket is the presenter of the table they watch.
+          if (socket.role === 'stage' && socket.presenter && table.presenter !== socket.presenter) { table.presenter = socket.presenter; broadcastSoon(table); }
           send(socket, { t: 'table', table: tableView(table, viewOf(socket)) });
           if (table.frame && socket.role !== 'reader' && socket.role !== 'stage') send(socket, { t: 'frame', table: table.id, image: table.frame.image, at: table.frame.at });
         }
@@ -687,7 +778,7 @@
 
   // Settings for demo mode (in the browser, no staff key, a few demo viewers, faster rounds).
   // demo-worker.js and demo.html both use this one copy.
-  const DEMO_OPTIONS = { staffKeyMatches: function () { return true; }, bots: 5, tableSettings: { openSeconds: 12, waitSeconds: 2, auto: true, streamDelay: 2 } };
+  const DEMO_OPTIONS = { staffKeyMatches: function (key) { return !/^(ticket|session):/.test(String(key || '')); }, bots: 5, tableSettings: { openSeconds: 12, waitSeconds: 2, auto: true, streamDelay: 2 } };
 
   return { createEngine: createEngine, DEMO_OPTIONS: DEMO_OPTIONS };
 });

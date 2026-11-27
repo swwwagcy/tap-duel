@@ -61,7 +61,9 @@ const engine = Engine.createEngine({
   // One line per sign-in attempt and per action that changes a round, for the service's log.
   audit: function (entry) { console.log('audit ' + JSON.stringify(Object.assign({ at: new Date().toISOString() }, entry))); },
   newId: function () { return crypto.randomUUID(); },
-  bots: Number(process.env.DEMO_VIEWERS) || 0
+  bots: Number(process.env.DEMO_VIEWERS) || 0,
+  // Tables start closed and a host opens each one; TABLES_START_OPEN=1 skips that step.
+  tablesStartOpen: process.env.TABLES_START_OPEN === '1'
 });
 
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json' };

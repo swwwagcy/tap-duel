@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Tap Duel Live 現場端</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  /* One page for whoever runs the table: sign in, choose the game, then switch between the host
+     console, the presenter's screen and the card reader. All three stay loaded and running, so
+     the reader keeps reading while another view is on top. */
+  html, body { height: 100%; }
+  body { overflow: hidden; }
+  .shell { height: 100%; display: grid; grid-template-rows: auto minmax(0, 1fr); }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: calc(6px + env(safe-area-inset-top, 0px)) max(10px, env(safe-area-inset-right, 0px)) 6px max(10px, env(safe-area-inset-left, 0px)); background: var(--surface); border-bottom: 1px solid var(--line); }
+  .bar .tabs { flex: 1 1 320px; max-width: 520px; }
+  .bar .tabs button, .bar > button { min-height: 38px; font-size: 14px; }
+  .bar .where { font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1 1 140px; }
+  .bar .where b { color: var(--fg); }
+  .bar .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--muted); margin-right: 5px; }
+  .bar .dot.on { background: var(--go); }
+  /* Stacked, the chosen one on top. The others are covered, not removed: a frame that is not
+     rendered stops drawing, and the reader would stop reading. */
+  .views { position: relative; min-height: 0; }
+  .views > .view { position: absolute; inset: 0; opacity: 0; pointer-events: none; z-index: 0; }
+  .views > .view.on { opacity: 1; pointer-events: auto; z-index: 1; }
+  .views iframe { width: 100%; height: 100%; border: 0; display: block; background: var(--bg); }
+  .pick { height: 100%; display: flex; flex-direction: column; gap: 16px; align-items: center; justify-content: center; padding: 24px 16px; text-align: center; }
+  .pick h1 { margin: 0; font-size: 26px; }
+  .pick .games { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; width: min(100%, 560px); }
+  .pick .games button { min-height: 96px; font-size: 22px; font-weight: 700; display: flex; flex-direction: column; gap: 4px; align-items: center; justify-content: center; }
+  .pick .games small { font-size: 13px; font-weight: 400; color: var(--muted); }
+  .pick p { margin: 0; color: var(--muted); max-width: 34em; }
+</style>
+</head>
+<body data-no-demo-tag="1">
+<div class="shell">
+  <header class="bar" id="bar" hidden>
+    <div class="tabs" id="viewTabs"></div>
+    <span class="where" id="where"></span>
+    <button id="popOut" type="button" hidden>主持人畫面開新視窗</button>
+    <button id="changeGame" type="button">換遊戲</button>
+  </header>
+  <main class="views" id="views">
+    <div class="view on" id="pick">
+      <div class="pick">
+        <h1 id="pickTitle">連線中…</h1>
+        <div class="games" id="games"></div>
+        <p id="pickNote"></p>
+      </div>
+    </div>
+  </main>
+</div>
+<div id="toast" class="toast" role="status"></div>
+<script src="games.js"></script>
+<script src="engine.js"></script>
+<script src="common.js"></script>
+<script src="reader-component.js"></script>
+<script src="table.js"></script>
+</body>
+</html>

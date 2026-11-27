@@ -110,6 +110,7 @@
     } else {
       word = '等主持台開始';
     }
+    if (table.tableOpen === false) { count = '—'; word = '還沒開桌'; say = '主控台開桌之後，觀眾才進得來'; }
     $('count').textContent = count; $('word').textContent = word; $('say').textContent = say;
   }
   setInterval(tick, 250);

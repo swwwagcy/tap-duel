@@ -161,7 +161,7 @@
     if (!table) return;
     var phase = table.phase, counting = phase === 'open' || phase === 'closed';
     $('count').textContent = counting ? Live.secondsLeft(table.endsAt) : phase === 'dealing' ? '出牌' : phase === 'result' ? (table.outcome ? shortResult(table.outcome) : '結果') : phase === 'void' ? '取消' : '—';
-    $('phase').textContent = phase === 'void' ? '全數退回' : phase === 'result' ? '' : PHASE_WORD[phase] || '';
+    $('phase').textContent = table.tableOpen === false ? '尚未開桌' : phase === 'void' ? '全數退回' : phase === 'result' ? '' : PHASE_WORD[phase] || '';
   }
   function shortResult(outcome) {
     var winner = outcome.winner;

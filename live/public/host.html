@@ -196,6 +196,12 @@
   <div class="head"><h2>設定與紀錄</h2><button id="closeDrawer" class="primary" type="button">回到主持台</button></div>
   <div class="grid">
     <div class="panel">
+      <h3 style="margin-top:0">這張桌</h3>
+      <div class="field"><span id="tableState">還沒開桌</span><button id="tableToggle" type="button">開桌</button></div>
+      <label class="field" for="presenterName"><span>主持人（發牌的人）</span><input id="presenterName" maxlength="16" placeholder="名稱或編號" style="width:160px"></label>
+      <p class="muted" style="font-size:14px">開桌之後才能開始回合；關桌會取消進行中的回合並退回點數。主持人用自己的登入碼進來時，名稱會自動帶入。</p>
+    </div>
+    <div class="panel">
       <h3 style="margin-top:0">本桌設定</h3>
       <label class="field" for="setOpen"><span>選擇秒數</span><input id="setOpen" type="number" min="5" max="120" inputmode="numeric"></label>
       <label class="field" for="setWait"><span>截止後等待秒數</span><input id="setWait" type="number" min="0" max="30" inputmode="numeric"></label>

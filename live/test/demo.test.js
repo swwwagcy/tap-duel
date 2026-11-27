@@ -23,11 +23,21 @@ const server = http.createServer((request, response) => {
   fs.readFile(file, (error, data) => { if (error) { response.writeHead(404); response.end(); return; } response.writeHead(200, { 'Content-Type': TYPES[path.extname(file)] || 'application/octet-stream' }); response.end(data); });
 });
 
+// A table starts closed: the host opens it once before the first round.
+async function openTable(host, label) {
+  await until(() => host.evaluate(() => !!document.querySelector('.zone') && /^(開桌|開始新回合)$/.test(document.getElementById('mainButton').textContent)), label + ': host console up');
+  if (await host.evaluate(() => document.getElementById('mainButton').textContent === '開桌')) {
+    assert.ok(await host.evaluate(() => /還沒開桌/.test(document.getElementById('guide').textContent)), label + ': the console says the table is closed');
+    await host.click('#mainButton');
+  }
+  await until(() => host.evaluate(() => document.getElementById('mainButton').textContent === '開始新回合'), label + ': table open');
+}
+
 async function playRound(page, table, spot) {
   const frame = name => page.frame({ url: new RegExp(name + '\\.html') });
   const host = frame('host'), viewer = frame('play'), reader = frame('reader');
   await until(() => reader.evaluate(() => window.__readerState && !!window.__readerState.frame), table + ': reader camera running', 40000);
-  await until(() => host.evaluate(() => document.querySelector('.zone') && document.getElementById('mainButton').textContent === '開始新回合'), table + ': host ready');
+  await openTable(host, table);
   const before = await viewer.evaluate(() => Number(document.getElementById('points').textContent.replace(/,/g, '')));
   await host.click('#mainButton');
   await until(() => viewer.evaluate(s => !document.querySelector('.spot[data-spot="' + s + '"]').disabled, spot), table + ': viewer can choose');
@@ -92,7 +102,7 @@ async function playRound(page, table, spot) {
     const host = await context.newPage(), viewer = await context.newPage();
     [host, viewer].forEach(tab => tab.on('pageerror', error => errors.push(error.message)));
     await host.goto(base + '/host.html?demo'); await viewer.goto(base + '/play.html?demo');
-    await until(() => host.evaluate(() => !!document.querySelector('.zone') && !document.getElementById('mainButton').disabled), 'standalone host ready');
+    await openTable(host, 'standalone');
     await host.click('#mainButton');
     await until(() => viewer.evaluate(() => document.getElementById('phase').dataset.phase === 'open'), 'standalone viewer sees the round the other tab opened');
     assert.ok(await host.evaluate(() => !!document.querySelector('.demotag')), 'demo tag shown on standalone pages');
@@ -120,6 +130,42 @@ async function playRound(page, table, spot) {
       step('presenter screen shows totals and people per spot; host lists every pick');
     }
 
+    // The single on-site page: choose the game, open the table, and play a round while switching
+    // views. The reader is mounted as a component and must keep reading while another view is on top.
+    {
+      const shell = await (await browser.newContext({ viewport: { width: 1280, height: 800 } })).newPage();
+      shell.on('pageerror', error => errors.push(error.message));
+      await shell.goto(base + '/table.html?demo');
+      await shell.waitForSelector('#games button[data-table="duel"]');
+      assert.strictEqual(await shell.evaluate(() => document.getElementById('bar').hidden), true, 'no views before a game is chosen');
+      await shell.click('#games button[data-table="duel"]');
+      const inside = name => shell.frames().find(item => new RegExp(name + '\\.html').test(item.url()));
+      await until(() => !!inside('host') && !!inside('stage') && !!inside('reader'), 'on-site page: three views loaded');
+      assert.ok(/reader\.html\?component/.test(inside('reader').url()), 'the reader runs as a component');
+      const host = inside('host'), reader = inside('reader'), stage = inside('stage');
+      await until(() => reader.evaluate(() => window.__readerState && !!window.__readerState.frame), 'on-site page: reader camera running', 40000);
+      await until(() => shell.evaluate(() => /還沒開桌/.test(document.getElementById('where').textContent)), 'on-site page: says the table is closed');
+      await openTable(host, 'on-site page');
+      await until(() => shell.evaluate(() => /已開桌/.test(document.getElementById('where').textContent)), 'on-site page: says the table is open');
+      await host.click('#mainButton');
+      // Put the presenter's screen on top and leave it there until the cards are in.
+      await shell.click('#viewTabs [data-view="stage"]');
+      assert.strictEqual(await shell.evaluate(() => document.querySelector('.view.on').dataset.view), 'stage');
+      await until(() => stage.evaluate(() => document.getElementById('clock').dataset.phase === 'open'), 'on-site page: presenter screen follows the round');
+      await until(() => host.evaluate(() => document.getElementById('phaseBox').dataset.phase === 'dealing' && /確認：/.test(document.getElementById('mainButton').textContent) && !document.getElementById('mainButton').disabled), 'on-site page: reader read the cards while covered', 60000);
+      const dealt = await reader.evaluate(() => window.__readerState.dealt);
+      const shown = await host.evaluate(() => Array.from(document.querySelectorAll('.zone')).map(tile => tile.textContent).join(' '));
+      assert.ok(Object.keys(dealt).length === 2 && shown.length > 0, 'both positions were dealt and shown');
+      await shell.click('#viewTabs [data-view="host"]');
+      await host.click('#mainButton');
+      await until(() => host.evaluate(() => document.getElementById('phaseBox').dataset.phase === 'result'), 'on-site page: round settled');
+      // Back to the picker: the views go away, and another game can be chosen.
+      await shell.click('#changeGame');
+      await until(() => shell.evaluate(() => document.querySelectorAll('#views iframe').length === 0 && !!document.querySelector('#games button')), 'on-site page: back at the game picker');
+      await shell.context().close();
+      step('on-site page: game chosen, table opened, round played with the reader as a component reading in the background');
+    }
+
     // The half sheet inside a mock live room: 390 x 347, no video of its own, and never ahead of
     // the stream: no card faces while dealing, the result only after the stream delay.
     {
@@ -131,7 +177,7 @@ async function playRound(page, table, spot) {
       await until(() => !!frame('sheet') && !!frame('host') && !!frame('reader'), 'room: frames loaded');
       const host = frame('host'), sheet = frame('sheet'), reader = frame('reader');
       await until(() => reader.evaluate(() => window.__readerState && !!window.__readerState.frame), 'room: reader camera running', 40000);
-      await until(() => host.evaluate(() => document.querySelector('.zone') && document.getElementById('mainButton').textContent === '開始新回合'), 'room: host ready');
+      await openTable(host, 'room');
       const box = await frame('room').evaluate(() => { const rect = document.getElementById('sheet').getBoundingClientRect(); return { width: Math.round(rect.width), height: Math.round(rect.height) }; });
       assert.ok(Math.abs(box.width / box.height - 390 / 347) < 0.02 && box.width <= 390, 'the sheet is given a frame in the 390 x 347 shape: ' + JSON.stringify(box));
       assert.strictEqual(await sheet.evaluate(() => document.querySelectorAll('img, video').length), 0, 'the sheet carries no picture of the table');

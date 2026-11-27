@@ -58,8 +58,12 @@
       return { post: function (message) { engine.receive(connection, JSON.parse(JSON.stringify(message))); }, close: function () { engine.disconnect(connection); } };
     }
     // The demo's engine lives in the outermost demo page; a page may sit one frame deeper (the room preview holds the sheet).
+    // A page that owns an engine uses it itself; a window opened from such a page uses its opener's.
+    var own = window.__demoEngine || null;
+    try { if (!own && window.opener && window.opener.__demoEngine) own = window.opener.__demoEngine; } catch (error) { /* another origin */ }
     try { for (var up = window; up.parent !== up && !parentEngine;) { up = up.parent; if (up.__demoEngine) parentEngine = up.__demoEngine; } } catch (error) { /* another origin */ }
     if (parentEngine) { transport = overEngine(parentEngine); Live.embedded = true; document.documentElement.classList.add('embedded'); }
+    else if (own) transport = overEngine(own);
     else if (window.SharedWorker) {
       var worker = new SharedWorker('demo-worker.js');
       worker.port.onmessage = function (event) { handle(event.data); };
@@ -122,7 +126,9 @@
   // The reader may have a key of its own (READER_KEY), so each page remembers its key separately.
   // A reader that has none yet uses the key the host page stored on the same device.
   // The viewer pages (everything but host and reader) have their own slot too, for VIEWER_KEY.
-  var staffPage = /(host|reader|stage)\.html$/.test(location.pathname);
+  var staffPage = /(host|reader|stage|table|admin)\.html$/.test(location.pathname);
+  // Inside the single on-site page the table is chosen once, outside; the pages' own table tabs are hidden.
+  if (/[?&]embed\b/.test(location.search)) document.documentElement.classList.add('embedded');
   function keySlot() { return /reader\.html$/.test(location.pathname) ? 'tdl-reader-key' : /stage\.html$/.test(location.pathname) ? 'tdl-stage-key' : staffPage ? 'tdl-staff-key' : 'tdl-viewer-key'; }
   Live.staffKey = function () {
     if (Live.demo) return 'demo';

@@ -114,7 +114,7 @@
     var table = state.table, current = game();
     if (!table) return;
     $('phase').dataset.phase = table.phase;
-    $('phase').textContent = Live.PHASE[table.phase] || table.phase;
+    $('phase').textContent = table.tableOpen === false ? '尚未開桌' : Live.PHASE[table.phase] || table.phase;
     $('round').textContent = table.roundNo ? '回合 ' + table.roundNo : '';
     var open = table.phase === 'open', share = {};
     Live.shareOf(current, table.totals).forEach(function (part) { share[part.id] = part; });

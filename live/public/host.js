@@ -217,6 +217,7 @@
     var table = state.table, guide = $('guide'), current = game();
     guide.classList.remove('bad'); guide.classList.remove('go');
     var stale = table.stale || [];
+    if (table.tableOpen === false) { guide.textContent = '這張桌還沒開桌。準備好之後按「開桌」，觀眾才進得來；之後再開始回合。'; return; }
     if (stale.length) {
       guide.classList.add('bad');
       guide.textContent = '請先收掉桌上的牌：' + stale.map(function (zone) { return Games.zoneLabel(current, zone); }).join('、') + (table.auto ? '。收完會自動開下一回合。' : '。');
@@ -286,7 +287,8 @@
 
   function renderButtons() {
     var table = state.table, main = $('mainButton'), phase = table.phase;
-    if (phase === 'idle' || phase === 'result' || phase === 'void') {
+    if (table.tableOpen === false) { main.textContent = '開桌'; main.disabled = false; }
+    else if (phase === 'idle' || phase === 'result' || phase === 'void') {
       var blocked = (table.stale || []).length > 0, armed = blocked && Date.now() < state.openArmedUntil;
       main.textContent = !blocked ? '開始新回合' : armed ? '再按一次：不收牌直接開始' : '桌上還有牌，先收掉';
       main.disabled = false;
@@ -297,7 +299,11 @@
       main.disabled = !ready || looking;
     }
     else { main.textContent = '等待截止'; main.disabled = true; }
-    var canVoid = phase === 'open' || phase === 'closed' || phase === 'dealing';
+    var canVoid = table.tableOpen !== false && (phase === 'open' || phase === 'closed' || phase === 'dealing');
+    $('tableState').textContent = table.tableOpen === false ? '還沒開桌' : '已開桌';
+    $('tableToggle').textContent = table.tableOpen === false ? '開桌' : '關桌';
+    $('tableToggle').classList.toggle('danger', table.tableOpen !== false);
+    if (document.activeElement !== $('presenterName')) $('presenterName').value = table.presenter || '';
     var armed = canVoid && Date.now() < state.voidArmedUntil;
     $('voidButton').disabled = !canVoid;
     $('voidButton').classList.toggle('armed', armed);
@@ -364,6 +370,7 @@
   function primary() {
     var table = state.table;
     if (!table || $('mainButton').disabled) return;
+    if (table.tableOpen === false) { link.send({ t: 'tableOpen', table: state.tableId }); return; }
     if (table.phase === 'dealing') link.send({ t: 'confirm', table: state.tableId });
     else if ((table.stale || []).length) {
       // Old cards still on the table: the first press only warns, a second one within 3 s overrides.
@@ -385,6 +392,17 @@
     if (event.key === 'Enter' || event.key === 'PageDown' || event.key === 'ArrowRight') { event.preventDefault(); if (!event.repeat) primary(); }
   });
   $('helpButton').addEventListener('click', function () { Live.toast('Enter、PageDown 或右方向鍵＝主按鈕。點牌位可以手動改牌。久未操作時該按的地方會閃爍；「提示音」打開後換階段會有聲音。'); });
+
+  /* ---------------- the table itself: open, close, who presents ---------------- */
+  $('tableToggle').addEventListener('click', function () {
+    var table = state.table;
+    if (!table) return;
+    if (table.tableOpen === false) { link.send({ t: 'tableOpen', table: state.tableId, presenter: $('presenterName').value }); return; }
+    // Closing cancels a round still running, so it takes a second press.
+    if (Date.now() < state.closeArmedUntil) { state.closeArmedUntil = 0; link.send({ t: 'tableClose', table: state.tableId }); $('tableToggle').textContent = '關桌'; }
+    else { state.closeArmedUntil = Date.now() + 3000; $('tableToggle').textContent = '再按一次關桌'; }
+  });
+  $('presenterName').addEventListener('change', function () { link.send({ t: 'presenter', table: state.tableId, name: $('presenterName').value }); });
 
   /* ---------------- settings drawer ---------------- */
   function fillSettings() {

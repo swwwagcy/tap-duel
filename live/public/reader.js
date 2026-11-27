@@ -53,6 +53,21 @@
   var link = null;
 
   /* ---------------- connection ---------------- */
+  // As a component (reader.html?component inside another page, see reader-component.js) the reader
+  // has no connection of its own: what it would send goes to the page that holds it, and that page
+  // tells it the table's state. The page decides what to do with the readings.
+  var component = /[?&]component\b/.test(location.search) && window.parent !== window;
+  function startAsComponent() {
+    link = { online: true, send: function (message) { window.parent.postMessage({ source: 'card-reader', message: message }, location.origin); }, close: function () {} };
+    window.addEventListener('message', function (event) {
+      if (event.origin !== location.origin || event.source !== window.parent || !event.data || event.data.source !== 'card-reader-host') return;
+      var message = event.data.message;
+      if (message && message.t === 'table' && message.table && message.table.id === state.tableId) { state.table = message.table; setPhase(message.table); }
+    });
+    buildTableTabs([state.tableId]);
+    window.parent.postMessage({ source: 'card-reader', message: { t: 'ready', table: state.tableId } }, location.origin);
+    if (/[?&]autostart\b/.test(location.search) && Live.demo && !state.source) startFake();
+  }
   function start(key) {
     link = Live.connect({
       hello: function () { return { t: 'hello', role: 'reader', key: key }; },
@@ -65,8 +80,9 @@
       }
     });
   }
-  var key = Live.staffKey();
-  if (key) start(key); else Live.askStaffKey(start);
+  var key = component ? null : Live.staffKey();
+  if (component) setTimeout(startAsComponent, 0);
+  else if (key) start(key); else Live.askStaffKey(start);
 
   function send(message) { if (link && link.online) { message.table = state.tableId; link.send(message); } }
   function setPhase(table) {

@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Tap Duel Live 登入碼</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  /* Stands in for a back office: makes sign-in codes for the on-site page. A code is shown as a
+     QR code, works once, and runs out after ten minutes; what it opens stays signed in on that device. */
+  body { padding: calc(16px + env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) 32px max(16px, env(safe-area-inset-left, 0px)); }
+  .wrap { max-width: 880px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+  h1 { margin: 0; font-size: 24px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; align-items: start; }
+  .panel { display: flex; flex-direction: column; gap: 10px; }
+  .panel h2 { margin: 0; font-size: 18px; }
+  .panel p { margin: 0; font-size: 14px; color: var(--muted); }
+  .panel label { display: flex; flex-direction: column; gap: 4px; font-size: 14px; }
+  .code { display: flex; flex-direction: column; gap: 8px; align-items: center; }
+  .code .qr { width: min(240px, 80%); background: #fff; border-radius: 10px; padding: 8px; }
+  .code .qr svg { display: block; width: 100%; height: auto; }
+  .code .link { font-size: 12px; overflow-wrap: anywhere; user-select: text; -webkit-user-select: text; color: var(--muted); text-align: center; }
+  .code .left { font-family: var(--font-num); font-weight: 700; }
+  .code.spent .qr { opacity: .25; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>登入碼</h1>
+  <p class="muted" style="margin:0">替現場端產生登入碼。對方用手機或電腦掃 QR code（或開連結）就登入，不用輸入密碼。每個碼只能用一次，10 分鐘內有效；登入後那台裝置會維持登入約 12 小時。</p>
+  <div class="cards">
+    <section class="panel">
+      <h2>控場的人</h2>
+      <p>可以開桌、開始回合、確認結果，也能開讀牌器與主持人畫面。</p>
+      <label>這張桌的主持人（選填，開桌時帶入）<input id="hostPresenter" maxlength="16" placeholder="名稱或編號"></label>
+      <button class="primary" id="makeHost" type="button">產生控場登入碼</button>
+      <div class="code" id="hostCode" hidden></div>
+    </section>
+    <section class="panel">
+      <h2>主持人（發牌的人）</h2>
+      <p>只能看主持人畫面。用這個碼登入的人，就是他所看那張桌的主持人。</p>
+      <label>主持人名稱或編號<input id="stagePresenter" maxlength="16" placeholder="必填"></label>
+      <button class="primary" id="makeStage" type="button">產生主持人登入碼</button>
+      <div class="code" id="stageCode" hidden></div>
+    </section>
+  </div>
+  <p class="muted" id="demoNote" style="margin:0" hidden>示範模式不需要登入碼：現場端會直接進去。這一頁在示範模式下只用來看流程。</p>
+</div>
+<div id="toast" class="toast" role="status"></div>
+<script src="games.js"></script>
+<script src="engine.js"></script>
+<script src="vendor/qrcode-generator.js"></script>
+<script src="common.js"></script>
+<script>
+(function () {
+  'use strict';
+  var $ = Live.$, link = null, waiting = null, timers = {};
+  $('demoNote').hidden = !Live.demo;
+  function start(key) {
+    link = Live.connect({
+      hello: function () { return { t: 'hello', role: 'host', key: key }; },
+      onMessage: function (message) {
+        if (message.t === 'denied') { link.close(); Live.askStaffKey(start, message.locked ? 'locked' : true); return; }
+        if (message.t === 'ticket' && waiting) { show(waiting, message); waiting = null; }
+        else if (message.t === 'error') Live.toast(message.text, 'bad');
+      }
+    });
+  }
+  function show(boxId, ticket) {
+    var box = $(boxId), address = Live.pageUrl('table.html').replace(/\?demo$/, '') + '#ticket=' + ticket.code;
+    box.hidden = false; box.classList.remove('spent');
+    box.innerHTML = '<div class="qr">' + Live.qrSvg(address) + '</div><div>剩 <span class="left"></span></div><div class="link">' + Live.escape(address) + '</div>';
+    clearInterval(timers[boxId]);
+    var tick = function () {
+      var left = Math.max(0, Math.ceil((ticket.expiresAt - Live.now()) / 1000));
+      box.querySelector('.left').textContent = left ? Math.floor(left / 60) + ':' + ('0' + left % 60).slice(-2) : '已失效';
+      if (!left) { box.classList.add('spent'); clearInterval(timers[boxId]); }
+    };
+    tick(); timers[boxId] = setInterval(tick, 1000);
+  }
+  $('makeHost').addEventListener('click', function () { waiting = 'hostCode'; link.send({ t: 'ticket', role: 'host', presenter: $('hostPresenter').value }); });
+  $('makeStage').addEventListener('click', function () {
+    if (!$('stagePresenter').value.trim()) { Live.toast('請先填主持人名稱或編號。', 'bad'); $('stagePresenter').focus(); return; }
+    waiting = 'stageCode'; link.send({ t: 'ticket', role: 'stage', presenter: $('stagePresenter').value });
+  });
+  var key = Live.staffKey();
+  if (key) start(key); else Live.askStaffKey(start);
+})();
+</script>
+</body>
+</html>
