@@ -12,7 +12,9 @@
      the reader keeps reading while another view is on top. */
   html, body { height: 100%; }
   body { overflow: hidden; }
-  .shell { height: 100%; display: grid; grid-template-rows: auto minmax(0, 1fr); }
+  /* A column, not a grid: the bar is hidden while a game is being chosen, and a hidden grid item
+     would hand its row to the views and collapse them. */
+  .shell { height: 100%; display: flex; flex-direction: column; }
   .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: calc(6px + env(safe-area-inset-top, 0px)) max(10px, env(safe-area-inset-right, 0px)) 6px max(10px, env(safe-area-inset-left, 0px)); background: var(--surface); border-bottom: 1px solid var(--line); }
   .bar .tabs { flex: 1 1 320px; max-width: 520px; }
   .bar .tabs button, .bar > button { min-height: 38px; font-size: 14px; }
@@ -22,16 +24,25 @@
   .bar .dot.on { background: var(--go); }
   /* Stacked, the chosen one on top. The others are covered, not removed: a frame that is not
      rendered stops drawing, and the reader would stop reading. */
-  .views { position: relative; min-height: 0; }
+  .views { position: relative; flex: 1 1 auto; min-height: 0; }
   .views > .view { position: absolute; inset: 0; opacity: 0; pointer-events: none; z-index: 0; }
   .views > .view.on { opacity: 1; pointer-events: auto; z-index: 1; }
   .views iframe { width: 100%; height: 100%; border: 0; display: block; background: var(--bg); }
-  .pick { height: 100%; display: flex; flex-direction: column; gap: 16px; align-items: center; justify-content: center; padding: 24px 16px; text-align: center; }
+  .pick { min-height: 100%; box-sizing: border-box; display: flex; flex-direction: column; gap: 16px; align-items: center; justify-content: center; padding: 24px 16px; text-align: center; }
+  #pick { overflow-y: auto; }
   .pick h1 { margin: 0; font-size: 26px; }
   .pick .games { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; width: min(100%, 560px); }
   .pick .games button { min-height: 96px; font-size: 22px; font-weight: 700; display: flex; flex-direction: column; gap: 4px; align-items: center; justify-content: center; }
   .pick .games small { font-size: 13px; font-weight: 400; color: var(--muted); }
   .pick p { margin: 0; color: var(--muted); max-width: 34em; }
+  /* Narrow screens: the tabs take a row of their own, everything else shares the next one. */
+  @media (max-width: 640px) {
+    .bar { gap: 6px; }
+    .bar .tabs { flex: 1 1 100%; max-width: none; }
+    .bar .tabs button, .bar > button { min-height: 34px; font-size: 13px; padding: 2px 8px; }
+    .bar .where { flex: 1 1 0; font-size: 12px; }
+    #popOut .long { display: none; }
+  }
 </style>
 </head>
 <body data-no-demo-tag="1">
@@ -39,7 +50,7 @@
   <header class="bar" id="bar" hidden>
     <div class="tabs" id="viewTabs"></div>
     <span class="where" id="where"></span>
-    <button id="popOut" type="button" hidden>主持人畫面開新視窗</button>
+    <button id="popOut" type="button" hidden><span class="long">主持人畫面</span>開新視窗</button>
     <button id="changeGame" type="button">換遊戲</button>
   </header>
   <main class="views" id="views">
