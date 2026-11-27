@@ -211,10 +211,16 @@
   $('startCamera').addEventListener('click', function () {
     if (window.__readerSource) { useSource(window.__readerSource, window.__readerSource.width, window.__readerSource.height); return; }
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { Live.toast('這個瀏覽器不能開相機，需要 HTTPS 網址。', 'bad'); return; }
-    navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: 'environment' }, width: { ideal: 3840 }, height: { ideal: 2160 } } }).then(function (stream) {
+    // A camera chosen earlier (a computer with several: built in, plus an action camera on USB) is
+    // asked for by id; if it is no longer there, the usual back camera is used instead.
+    var chosen = Live.store.get('tdl-reader-camera', '');
+    var wanted = { width: { ideal: 3840 }, height: { ideal: 2160 } };
+    var open = function (byId) { return navigator.mediaDevices.getUserMedia({ audio: false, video: Object.assign(byId ? { deviceId: { exact: chosen } } : { facingMode: { ideal: 'environment' } }, wanted) }); };
+    (chosen ? open(true).catch(function () { Live.store.remove('tdl-reader-camera'); return open(false); }) : open(false)).then(function (stream) {
       var video = $('video');
       state.track = stream.getVideoTracks()[0] || null;
       video.srcObject = stream;
+      listCameras();
       $('startCamera').disabled = true; $('startCamera').textContent = '相機啟動中…';
       var play = video.play();
       if (play && play.catch) play.catch(function () { /* waits for the size below either way */ });
@@ -228,6 +234,25 @@
       })();
     }).catch(function (error) { Live.toast('無法開啟相機：' + error.name + '。請允許相機權限。', 'bad'); });
   });
+  // With more than one camera, offer a choice. Switching reloads the page: the positions and the
+  // table corners are kept on this device, and the reading starts cleanly on the new picture.
+  function listCameras() {
+    if (!navigator.mediaDevices.enumerateDevices) return;
+    navigator.mediaDevices.enumerateDevices().then(function (devices) {
+      var cameras = devices.filter(function (device) { return device.kind === 'videoinput'; });
+      if (cameras.length < 2) return;
+      var current = state.track && state.track.getSettings ? state.track.getSettings().deviceId : '';
+      $('cameraPick').innerHTML = cameras.map(function (camera, index) {
+        return '<option value="' + Live.escape(camera.deviceId) + '"' + (camera.deviceId === current ? ' selected' : '') + '>' + Live.escape(camera.label || '鏡頭 ' + (index + 1)) + '</option>';
+      }).join('');
+      $('cameraPickBox').hidden = false;
+    }).catch(function () { /* no list: the one camera in use stays */ });
+  }
+  $('cameraPick').addEventListener('change', function () {
+    Live.store.set('tdl-reader-camera', $('cameraPick').value);
+    location.reload();
+  });
+
   function useSource(source, sourceWidth, sourceHeight) {
     state.source = source; state.sourceWidth = sourceWidth; state.sourceHeight = sourceHeight;
     workContext = work.getContext('2d', { willReadFrequently: true });
