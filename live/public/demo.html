@@ -49,30 +49,28 @@
       <button type="button" data-table="nine">九點</button>
     </div>
     <span class="spacer"></span>
-    <a id="onSite" href="table.html?demo" style="color:var(--go);font-weight:700;font-size:14px">改看現場端（一頁全部）→</a>
+    <a id="onSite" href="table.html?demo" style="color:var(--go);font-weight:700;font-size:14px">現場端（實際使用的一頁）→</a>
     <button id="restart" type="button">重新開始示範</button>
   </div>
   <ol class="steps">
-    <li>控場的人在<b>主持台</b>先按「開桌」，再按「開始新回合」，觀眾有 12 秒可以選擇（另有 5 位示範觀眾會隨機參與）。</li>
+    <li>在<b>主控台</b>按「開桌」，再按「開始新回合」。觀眾有 12 秒可以選擇（另有 5 位示範觀眾會隨機參與）。</li>
     <li><b>觀眾</b>選點數面額，再點格子投入。</li>
-    <li>截止後，<b>讀牌器</b>的模擬攝影機會自動把牌放到該出牌的位置並辨識。</li>
-    <li><b>主持台</b>核對讀到的牌，按「確認結果」結算；認不出來的牌點牌位手動選。</li>
-    <li>現場實際用的是<b>現場端</b>：同一頁裡切換主控台、主持人畫面、讀牌器（右上角連結）。這一頁把它們攤開並排，方便一次看到全部。</li>
-    <li>最下面的<b>主持人畫面</b>是發牌的人看的：倒數、每格總點數與人數、誰選了多少、下一張發到哪裡。只能看。</li>
+    <li>截止後，<b>讀牌器</b>的模擬攝影機會自動出牌並辨識。</li>
+    <li><b>主控台</b>核對讀到的牌，按「確認結果」結算；認不出來的牌點牌位手動選。</li>
   </ol>
   <div class="tabs switch" id="viewTabs">
     <button type="button" data-view="viewer" class="on">觀眾</button>
-    <button type="button" data-view="host">主持台</button>
+    <button type="button" data-view="host">主控台</button>
     <button type="button" data-view="reader">讀牌器</button>
     <button type="button" data-view="stage">主持人</button>
   </div>
   <div class="views">
     <section class="view viewer on"><h2>觀眾（手機）<button id="viewerMode" type="button" style="min-height:28px;padding:0 10px;font-size:13px">改看直播間半屏版</button><a id="viewerLink" target="_blank" rel="noopener">另開分頁</a></h2><iframe id="viewerFrame" title="觀眾"></iframe></section>
-    <section class="view host"><h2>主持台（控場的人）<a id="hostLink" target="_blank" rel="noopener">另開分頁</a></h2><iframe id="hostFrame" title="主持台"></iframe></section>
+    <section class="view host"><h2>主控台（控場的人）<a id="hostLink" target="_blank" rel="noopener">另開分頁</a></h2><iframe id="hostFrame" title="主控台"></iframe></section>
     <section class="view reader"><h2>讀牌器（牌桌上方的手機，模擬攝影機）<a id="readerLink" target="_blank" rel="noopener">另開分頁</a></h2><iframe id="readerFrame" title="讀牌器" allow="camera"></iframe></section>
-    <section class="view stage"><h2>主持人畫面（發牌的人看，鏡頭外的螢幕）<a id="stageLink" target="_blank" rel="noopener">另開分頁</a></h2><iframe id="stageFrame" title="主持人畫面"></iframe></section>
+    <section class="view stage"><h2>主持人畫面（發牌的人看，只能看）<a id="stageLink" target="_blank" rel="noopener">另開分頁</a></h2><iframe id="stageFrame" title="主持人畫面"></iframe></section>
   </div>
-  <p class="muted" style="margin:0;font-size:13px">示範模式：伺服器在這個瀏覽器裡執行，資料不會離開這台裝置，重新整理就重新開始。「另開分頁」開的是另一份示範資料，跟這一頁不共用。點數只用於示範。</p>
+  <p class="muted" style="margin:0;font-size:13px">示範模式：全部在這個瀏覽器裡執行，重新整理就重新開始。點數只用於示範。</p>
 </div>
 <script src="games.js"></script>
 <script src="engine.js"></script>

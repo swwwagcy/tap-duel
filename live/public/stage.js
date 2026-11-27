@@ -99,16 +99,16 @@
       else { word = '觀眾選擇中'; say = '可以帶氣氛、催大家選擇'; }
       if (delay) say += '（已提前 ' + (delay / 1000) + ' 秒，配合直播延遲）';
     } else if (phase === 'closed') {
-      count = '停'; word = '已截止'; say = '等主持台變綠再發牌';
+      count = '停'; word = '已截止'; say = '等主控台變綠再發牌';
     } else if (phase === 'dealing') {
       var next = table.next ? Games.zoneLabel(game(), table.next) : '';
-      count = next || '等確認'; word = next ? '下一張發到這裡' : '牌到齊了'; say = next ? '' : '主持台核對後會確認';
+      count = next || '等確認'; word = next ? '下一張發到這裡' : '牌到齊了'; say = next ? '' : '主控台核對後會確認';
     } else if (phase === 'result') {
-      count = table.outcome ? table.outcome.text : '結果'; word = '結果'; say = '收牌後等主持台開下一回合';
+      count = table.outcome ? table.outcome.text : '結果'; word = '結果'; say = '收牌後等主控台開下一回合';
     } else if (phase === 'void') {
-      count = '取消'; word = '本回合取消'; say = '全數退回，等主持台開下一回合';
+      count = '取消'; word = '本回合取消'; say = '全數退回，等主控台開下一回合';
     } else {
-      word = '等主持台開始';
+      word = '等主控台開始';
     }
     if (table.tableOpen === false) { count = '—'; word = '還沒開桌'; say = '主控台開桌之後，觀眾才進得來'; }
     $('count').textContent = count; $('word').textContent = word; $('say').textContent = say;

@@ -6,7 +6,7 @@
 
 - 一個 Google Cloud 專案，並且**已經綁定帳單**（Cloud Run 要求）。
 - 你在這個專案有 Owner 或 Editor 權限。
-- 決定一組**工作人員密碼**（主持台與讀牌器要輸入的），下面用 `你的密碼` 代表。
+- 決定一組**工作人員密碼**（主控台與讀牌器要輸入的），下面用 `你的密碼` 代表。
 
 ## 1. 打開 Cloud Shell
 
@@ -86,12 +86,12 @@ Service URL: https://tap-duel-live-xxxxxxxxxx.asia-east1.run.app
 
 | 參數 | 原因 |
 |---|---|
-| `--max-instances 1` | **必要。** 回合、點數、讀到的牌都在伺服器記憶體裡；開兩個執行個體，觀眾和主持台會各自看到不同的回合。 |
+| `--max-instances 1` | **必要。** 回合、點數、讀到的牌都在伺服器記憶體裡；開兩個執行個體，觀眾和主控台會各自看到不同的回合。 |
 | `--min-instances 1` | 縮到零就等於重開，所有點數與紀錄歸零。代價是會持續計費。 |
-| `--concurrency 1000` | **必要。** 每位觀眾、主持台、讀牌器各佔一條連線，Cloud Run 預設每個執行個體只收 80 條，加上只有一個執行個體，第 81 個人就連不上。1000 是上限。 |
+| `--concurrency 1000` | **必要。** 每位觀眾、主控台、讀牌器各佔一條連線，Cloud Run 預設每個執行個體只收 80 條，加上只有一個執行個體，第 81 個人就連不上。1000 是上限。 |
 | `--session-affinity` | 讓同一個瀏覽器的連線盡量回到同一個執行個體。 |
 | `--timeout 3600` | 每條連線最長一小時，到時頁面會自動重連。 |
-| `--allow-unauthenticated` | 觀眾不用登入 Google 就能打開。主持台與讀牌器另外靠工作人員密碼保護。 |
+| `--allow-unauthenticated` | 觀眾不用登入 Google 就能打開。主控台與讀牌器另外靠工作人員密碼保護。 |
 | `--region asia-east1` | 台灣機房，延遲最低。 |
 
 ## 6. 確認
@@ -104,22 +104,24 @@ curl -s $URL/health      # 應該印出 ok
 echo $URL
 ```
 
-三個頁面：
+頁面：
 
 | 頁面 | 網址 | 裝置 |
 |---|---|---|
 | 觀眾 | `網址/play.html` | 每位觀眾的手機 |
-| 主持台 | `網址/host.html#key=你的密碼` | iPad |
-| 讀牌器 | `網址/reader.html#key=你的密碼` | 牌桌上方的手機 |
+| 現場端 | `網址/table.html#key=你的密碼` | 控場的人的電腦或平板（主控台、主持人畫面、讀牌器都在這一頁切換） |
+| 登入碼 | `網址/admin.html` | 產生登入 QR code，讓其他裝置不用輸入密碼就進現場端 |
 
-`#key=` 只需要開一次，密碼會記在那台裝置上並從網址移除。之後直接開 `host.html`、`reader.html` 就好。**不要把含密碼的網址傳到群組裡**；也可以不帶 `#key=`，頁面會要求輸入。
+`#key=` 只需要開一次，密碼會記在那台裝置上並從網址移除。**不要把含密碼的網址傳到群組裡**；也可以不帶 `#key=`，頁面會要求輸入。另一支手機只當讀牌器時，直接開 `網址/reader.html`。
+
+部署後每張桌預設是關的：在主控台按「開桌」之後才能開始回合（設環境變數 `TABLES_START_OPEN=1` 可以改成一開始就開著）。
 
 建議的第一次測試：
 
-1. 讀牌器手機開 `reader.html`，按「開始相機」，允許相機權限（Cloud Run 是 HTTPS，所以可以開相機）。依 `README.md` 的流程調整牌位即可，不用登記牌組。
-2. iPad 開 `host.html`，按「開始新回合」。
+1. 開 `table.html`，選遊戲，切到「讀牌器」按「開始相機」，允許相機權限（Cloud Run 是 HTTPS，所以可以開相機）。依 `README.md` 的流程調整牌位即可，不用登記牌組。
+2. 切回「主控台」，按「開桌」，再按「開始新回合」。
 3. 另一支手機開 `play.html`，倒數內選一格。
-4. 截止後發牌，主持台確認結果，觀眾的點數應該跟著變。
+4. 截止後發牌，主控台確認結果，觀眾的點數應該跟著變。
 
 ## 7. 之後更新
 
@@ -153,7 +155,7 @@ gcloud run services logs read tap-duel-live --region asia-east1 --limit 50
 
 - 其他：每條連線每秒最多 60 則訊息、最多 1,200 條連線、記住的觀眾最多 5,000 位（超過時先忘掉沒在線上的）、頁面只能載入自己的檔案、容器不以 root 執行。
 
-**選用：讓讀牌器用另一組密碼。** 預設主持台與讀牌器共用 `STAFF_KEY`。想分開的話，多存一組密碼並在部署時多帶一個變數：
+**選用：讓讀牌器用另一組密碼。** 預設主控台與讀牌器共用 `STAFF_KEY`。想分開的話，多存一組密碼並在部署時多帶一個變數：
 
 ```bash
 printf '%s' '讀牌器的密碼' | gcloud secrets create tap-duel-reader-key --data-file=-
@@ -163,7 +165,7 @@ gcloud secrets add-iam-policy-binding tap-duel-reader-key \
 gcloud run services update tap-duel-live --region asia-east1 --update-secrets READER_KEY=tap-duel-reader-key:latest
 ```
 
-設了之後：讀牌器的密碼只能開讀牌器，**不能進主持台、不能確認結果**；主持台的密碼兩邊都能開。架在桌上的那支手機只需要知道讀牌器的密碼。
+設了之後：讀牌器的密碼只能開讀牌器，**不能進主控台、不能確認結果**；主控台的密碼兩邊都能開。架在桌上的那支手機只需要知道讀牌器的密碼。
 
 **選用：觀眾端也要密碼。** 預設觀眾頁（`play.html`、半屏 `sheet.html`、直播間預覽 `room.html`）知道網址就能開。只想讓特定的人進來時，再設一組觀看密碼：
 
@@ -180,9 +182,9 @@ gcloud run services update tap-duel-live --region asia-east1 --update-secrets VI
 設了之後：
 
 - 沒有密碼的人打開觀眾頁會先看到輸入密碼的畫面，連牌桌狀態都看不到。輸入一次後這台裝置會記住。
-- 主持台「設定」裡的觀眾 QR code 會自動帶上觀看密碼，掃了直接進場；手動輸入網址的人要另外告訴他密碼。**QR code 等於密碼，不要讓它出現在公開的直播畫面上。**
-- 觀看密碼只能開觀眾頁，不能進主持台或讀牌器；主持台的密碼也能開觀眾頁。
-- 觀眾輸錯密碼的次數和工作人員分開計算，同一個辦公室網路的觀眾打錯不會把主持台鎖住。
+- 主控台「設定」裡的觀眾 QR code 會自動帶上觀看密碼，掃了直接進場；手動輸入網址的人要另外告訴他密碼。**QR code 等於密碼，不要讓它出現在公開的直播畫面上。**
+- 觀看密碼只能開觀眾頁，不能進主控台或讀牌器；主控台的密碼也能開觀眾頁。
+- 觀眾輸錯密碼的次數和工作人員分開計算，同一個辦公室網路的觀眾打錯不會把主控台鎖住。
 - 要嵌進別的頁面時，網址後面加 `#key=觀看密碼`（`#` 之後的內容不會送到伺服器，也不會進 log）。
 - 拿掉密碼：`gcloud run services update tap-duel-live --region asia-east1 --remove-secrets VIEWER_KEY`（簡化版用 `--remove-env-vars VIEWER_KEY`）。
 
@@ -228,7 +230,7 @@ gcloud run services delete tap-duel-live --region asia-east1
 - **`/healthz` 回 Google 的 404 頁面**：Cloud Run 保留結尾是 `z` 的路徑，請求不會送到伺服器。檢查請用 `/health`（2026-11-20 之前部署的版本沒有 `/health`，可以用 `curl -s $URL/ | head -5`，看到 `<title>Tap Duel Live</title>` 就是正常）。
 
 - **觀眾很多時有人連不上**：確認部署時有 `--concurrency 1000`，到 Cloud Console 的服務詳細資料看「每個執行個體的並行要求上限」。
-- **主持台和觀眾看到的回合不一樣**：最大執行個體數不是 1，重新部署並確認 `--max-instances 1`。
+- **主控台和觀眾看到的回合不一樣**：最大執行個體數不是 1，重新部署並確認 `--max-instances 1`。
 - **讀牌器開不了相機**：要用 `https://` 開頭的網址，並在瀏覽器允許相機權限；iPhone 請用 Safari。
-- **主持台說密碼不對**：依序檢查。①第 3 步的 `你的密碼` 有沒有被原樣貼上（那密碼就是這四個中文字）。②`gcloud run services logs read tap-duel-live --region asia-east1 --limit 200 | grep -i STAFF_KEY`，出現 `STAFF_KEY is not set` 代表伺服器沒拿到密碼，改用了同一行印出的隨機密碼，通常是第 3-2 步的授權沒成功。③`gcloud secrets versions access latest --secret=tap-duel-staff-key | od -c` 看結尾有沒有 `\n` 或空白。最快的解法是在保險箱存一組只有英文數字的新密碼：`printf '%s' '新密碼' | gcloud secrets versions add tap-duel-staff-key --data-file=-`，再 `gcloud run services update tap-duel-live --region asia-east1 --update-secrets STAFF_KEY=tap-duel-staff-key:latest`，然後開 `host.html#key=新密碼` 覆蓋裝置記住的舊值。（不要在同一個指令裡同時用 `--remove-secrets STAFF_KEY` 和 `--update-env-vars STAFF_KEY=…`，gcloud 會拒絕：同一個變數不能直接從讀保險箱改成直接給值。）用中文輸入法時注意要輸入半形英數字。
+- **主控台說密碼不對**：依序檢查。①第 3 步的 `你的密碼` 有沒有被原樣貼上（那密碼就是這四個中文字）。②`gcloud run services logs read tap-duel-live --region asia-east1 --limit 200 | grep -i STAFF_KEY`，出現 `STAFF_KEY is not set` 代表伺服器沒拿到密碼，改用了同一行印出的隨機密碼，通常是第 3-2 步的授權沒成功。③`gcloud secrets versions access latest --secret=tap-duel-staff-key | od -c` 看結尾有沒有 `\n` 或空白。最快的解法是在保險箱存一組只有英文數字的新密碼：`printf '%s' '新密碼' | gcloud secrets versions add tap-duel-staff-key --data-file=-`，再 `gcloud run services update tap-duel-live --region asia-east1 --update-secrets STAFF_KEY=tap-duel-staff-key:latest`，然後開 `host.html#key=新密碼` 覆蓋裝置記住的舊值。（不要在同一個指令裡同時用 `--remove-secrets STAFF_KEY` 和 `--update-env-vars STAFF_KEY=…`，gcloud 會拒絕：同一個變數不能直接從讀保險箱改成直接給值。）用中文輸入法時注意要輸入半形英數字。
 - **部署時 Cloud Build 權限錯誤**：較新的專案預設不給 Cloud Build 足夠權限，錯誤訊息會指出缺哪個角色，請專案擁有者授予後重跑。

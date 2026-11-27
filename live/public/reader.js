@@ -614,7 +614,7 @@
     if (!state.source) return '還沒開始相機。';
     if (state.mode !== 'run') return '目前在「' + (state.mode === 'quad' ? '桌面校正' : '調整牌位') + '」，回到「運行」才會讀牌。';
     if (!link || !link.online) return '沒有連上伺服器，讀到的牌不會送出。';
-    if (state.table && state.table.phase !== 'dealing') return '主持台的「' + game().name + '」還沒到出牌階段（目前：' + Live.PHASE[state.table.phase] + '）。讀到的牌會顯示在這裡，但要到出牌階段才會送出；主持台要選同一款遊戲。';
+    if (state.table && state.table.phase !== 'dealing') return '主控台的「' + game().name + '」還沒到出牌階段（目前：' + Live.PHASE[state.table.phase] + '）。讀到的牌會顯示在這裡，但要到出牌階段才會送出；主控台要選同一款遊戲。';
     return '';
   }
   // Each position shows its state and the numbers behind it, so a stalled step is visible.
