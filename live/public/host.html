@@ -132,7 +132,8 @@
   .hist .c { display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 11px; color: var(--muted); }
   .hist .c img { width: 40px; height: 54px; object-fit: cover; border-radius: 4px; }
   @media (max-aspect-ratio: 1/1) {
-    .main { grid-template-columns: 1fr; grid-template-rows: minmax(170px, 1fr) auto; }
+    /* Scrolls inside itself when the screen is short, so nothing slides under the buttons below. */
+    .main { grid-template-columns: 1fr; grid-template-rows: minmax(170px, 1fr) auto; overflow-y: auto; }
     .side { grid-template-columns: 1fr 1fr; grid-template-rows: auto; }
     .camera { height: clamp(120px, 19vh, 260px); }
     .notes { display: none; }
@@ -141,6 +142,11 @@
     .side { grid-template-areas: "camera totals" "awake awake" "detail detail"; grid-template-rows: auto auto auto; }
     /* A fixed height: the list scrolls inside it, so picks coming in never push the card positions smaller. */
     .detail { height: clamp(112px, 17vh, 220px); }
+  }
+  /* Wide but short (a laptop, or this page inside the on-site page): the side column keeps each
+     panel at a usable height and scrolls, instead of squeezing the pick list to nothing. */
+  @media (min-aspect-ratio: 1/1) and (max-height: 700px) {
+    .side { grid-template-rows: 110px auto auto minmax(130px, 1fr) 56px; overflow-y: auto; }
   }
   @media (max-width: 560px) { .top { grid-template-columns: 1fr auto; } .phasebox { grid-column: 1 / -1; grid-row: 2; } .zone .shot { display: none; } .camera .state { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } }
 </style>
